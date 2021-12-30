@@ -1,5 +1,7 @@
 package lsm
 
+import "github.com/zach030/OctopusDB/internal/kv/utils"
+
 type MemTable struct {
-	skipList *SkipList
+	skipList *utils.SkipList
 }
