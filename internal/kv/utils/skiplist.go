@@ -159,11 +159,11 @@ func (s *SkipList) NewIterator() *SkipListIterator {
 }
 
 func (s *SkipListIterator) Next() {
-
+	s.ele = s.ele.levels[0]
 }
 
 func (s *SkipListIterator) Rewind() {
-
+	s.ele = s.sl.header.levels[0]
 }
 
 func (s *SkipListIterator) Valid() bool {
