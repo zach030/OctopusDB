@@ -1,5 +1,7 @@
 package server
 
-type OctopusServer struct {
+import "github.com/zach030/OctopusDB/storage"
 
+type OctopusServer struct {
+	storage storage.Storage
 }
