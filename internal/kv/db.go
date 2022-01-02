@@ -8,8 +8,17 @@ import (
 type OctopusDB struct {
 	lsm  *lsm.LSM
 	vlog *vlog.Vlog
+	opt  *Options
 }
 
-func Open() *OctopusDB {
-	return &OctopusDB{}
+func Open(opt *Options) *OctopusDB {
+	db := &OctopusDB{opt: opt}
+	db.lsm = lsm.NewLSM(&lsm.Config{
+		WorkDir:            opt.WorkDir,
+		MemTableSize:       opt.MemTableSize,
+		SSTableMaxSz:       opt.SSTableMaxSz,
+		BlockSize:          4 * 1024,
+		BloomFalsePositive: 0.01,
+	})
+	return db
 }

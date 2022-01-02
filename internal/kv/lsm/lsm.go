@@ -19,8 +19,9 @@ type Config struct {
 	BloomFalsePositive float64
 }
 
-func NewLSM() *LSM {
-	return &LSM{}
+func NewLSM(cfg *Config) *LSM {
+	lsm := &LSM{cfg: cfg}
+	return lsm
 }
 
 func (l *LSM) Close() error {

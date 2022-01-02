@@ -22,7 +22,7 @@ type MemTable struct {
 	buf      *bytes.Buffer
 }
 
-func (l *LSM) NewMemTable() *MemTable {
+func (l *LSM) openMemTable() *MemTable {
 	fid := atomic.AddUint32(&l.maxMemFd, 1)
 	opt := &file.Option{
 		FID:   fid,
@@ -41,7 +41,7 @@ func (l *LSM) NewMemTable() *MemTable {
 
 func (m *MemTable) Set(entry *utils.Entry) error {
 	// 先写wal
-	if err := m.wal.Add(entry); err != nil {
+	if err := m.wal.Write(entry); err != nil {
 		return err
 	}
 	// 再写内存跳表
