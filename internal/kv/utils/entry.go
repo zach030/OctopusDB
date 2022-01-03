@@ -25,3 +25,7 @@ func (e *Entry) WithTTL(duration time.Duration) *Entry {
 	e.ExpiresAt = uint64(time.Now().Add(duration).Unix())
 	return e
 }
+
+func ValueSize(data []byte) int64 {
+	return int64(len(data))
+}

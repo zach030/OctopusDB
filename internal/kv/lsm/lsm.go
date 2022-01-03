@@ -44,3 +44,7 @@ func (l *LSM) Get(key []byte) (*utils.Entry, error) {
 	}
 	return nil, nil
 }
+
+func (l *LSM) StartCompaction() {
+	// todo 对sst文件进行合并
+}
