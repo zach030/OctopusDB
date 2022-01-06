@@ -10,7 +10,7 @@ import (
 
 type Wal struct {
 	file *MmapFile
-	lock sync.RWMutex
+	lock *sync.RWMutex
 	opt  *Option
 	buf  *bytes.Buffer
 
@@ -23,7 +23,7 @@ func OpenWalFile(opt *Option) *Wal {
 	if err != nil {
 		return nil
 	}
-	wal := &Wal{file: mf, opt: opt}
+	wal := &Wal{file: mf, opt: opt, lock: &sync.RWMutex{}}
 	wal.buf = &bytes.Buffer{}
 	wal.size = uint32(len(wal.file.Data))
 	return wal

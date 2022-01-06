@@ -13,7 +13,7 @@ type Options struct {
 // NewDefaultOptions 返回默认的options
 func NewDefaultOptions() *Options {
 	opt := &Options{
-		WorkDir:      "./work_test",
+		WorkDir:      "./data",
 		MemTableSize: 1024,
 		SSTableMaxSz: 1 << 30,
 	}

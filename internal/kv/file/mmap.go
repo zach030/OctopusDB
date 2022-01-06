@@ -2,7 +2,10 @@ package file
 
 import (
 	"fmt"
+	"log"
 	"os"
+
+	"github.com/zach030/OctopusDB/internal/kv/utils/mmap"
 )
 
 type MmapFile struct {
@@ -23,13 +26,21 @@ func OpenMmapFileWithName(filename string, flag int, maxSz int) (*MmapFile, erro
 }
 
 func OpenMmapFile(fd *os.File, size int, write bool) (*MmapFile, error) {
-	//fname := fd.Name()
-	//fstat, err := fd.Stat()
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	return nil, nil
+	fname := fd.Name()
+	fstat, err := fd.Stat()
+	if err != nil {
+		log.Println("stat mmap file failed,err:", err, ",filename:", fname)
+		return nil, err
+	}
+	fileSize := fstat.Size()
+	buf, err := mmap.Mmap(fd, write, fileSize)
+	if err != nil {
+
+	}
+	return &MmapFile{
+		Data: buf,
+		Fd:   fd,
+	}, nil
 }
 
 func (m *MmapFile) AppendBuffer(offset uint32, buf []byte) error {

@@ -8,6 +8,13 @@ type Entry struct {
 	ExpiresAt uint64
 }
 
+func NewEntry(key, value []byte) *Entry {
+	return &Entry{
+		Key:   key,
+		Value: value,
+	}
+}
+
 type ValueStruct struct {
 	Value     []byte
 	ExpiresAt uint64
