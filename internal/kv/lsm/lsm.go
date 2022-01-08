@@ -13,6 +13,7 @@ type LSM struct {
 	memTable   *MemTable
 	imMemTable []*MemTable
 	cfg        *Config
+	levels     *LevelManager
 	maxMemFd   uint64
 }
 
@@ -28,6 +29,7 @@ type Config struct {
 
 func NewLSM(cfg *Config) *LSM {
 	lsm := &LSM{cfg: cfg}
+	lsm.levels = lsm.initLevelManager(cfg)
 	lsm.memTable, lsm.imMemTable = lsm.recover()
 	return lsm
 }
@@ -38,9 +40,20 @@ func (l *LSM) Close() error {
 
 func (l *LSM) Set(entry *utils.Entry) error {
 	// 判断memtable是否超过大小，需要关闭，新建memtable
+	if int64(l.memTable.wal.Size()) > l.cfg.MemTableSize {
+		l.imMemTable = append(l.imMemTable, l.memTable)
+		l.memTable = l.NewMemTable()
+	}
 	if err := l.memTable.Set(entry); err != nil {
 		return err
 	}
+	// 将已经不变的immt刷到disk，成为sst文件
+	for _, immt := range l.imMemTable {
+		if err := l.levels.flush(immt); err != nil {
+			return err
+		}
+	}
+	l.imMemTable = make([]*MemTable, 0)
 	return nil
 }
 
@@ -55,7 +68,7 @@ func (l *LSM) Get(key []byte) (*utils.Entry, error) {
 			return e, nil
 		}
 	}
-	return nil, nil
+	return l.levels.Get(key)
 }
 
 func (l *LSM) StartCompaction() {

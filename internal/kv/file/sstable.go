@@ -15,12 +15,15 @@ import (
 
 // SSTable construct of : block1 | block2 | ... | index_data | index_len | check_sum | check_sum_len
 type SSTable struct {
-	mf             *MmapFile
-	tableIdx       *pb.TableIndex
-	hasBloomFilter bool
-	idxStart       int
-	idxLen         int
-	fid            uint64
+	mf             *MmapFile      // mmap file for current table
+	tableIdx       *pb.TableIndex // index record block metadata with: offset, size, start-key
+	hasBloomFilter bool           // if contains bloom-filter
+	idxStart       int            // start pos of index
+	idxLen         int            // length of table index
+	fid            uint64         // current sstable file id
+	// store min/max key: faster to judge if the key is in current sst file
+	minKey []byte // min key in current table
+	maxKey []byte // max key for current table
 }
 
 func OpenSSTable(option *Option) *SSTable {
@@ -36,8 +39,9 @@ func (s *SSTable) Init() error {
 	if err != nil {
 		return err
 	}
-	// todo init sstable with key max/min and limit
-	blockMeta.GetKey()
+	s.minKey = blockMeta.GetKey()
+	blocks := len(s.tableIdx.GetOffsets())
+	s.maxKey = s.tableIdx.GetOffsets()[blocks-1].Key
 	return nil
 }
 

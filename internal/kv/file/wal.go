@@ -42,3 +42,11 @@ func (w *Wal) Write(entry *utils.Entry) error {
 	// 将处理后的entry放入buf
 	return nil
 }
+
+func (w *Wal) Size() uint32 {
+	return w.writeAt
+}
+
+func (w *Wal) FID() uint64 {
+	return w.opt.FID
+}

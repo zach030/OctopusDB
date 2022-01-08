@@ -18,3 +18,6 @@ Separating Keys from Values. Distributed Database System. Support Graph Query.
    1. 如何序列化：从内存到磁盘，序列化是不可避免的问题
    2. 通用的序列化思路：`meta ｜ index ｜ data`
    3. 如何高效的读写？使用`mmap`技术，磁盘--用户空间直接映射，用户操作内存`[]byte`，系统负责异步写磁盘
+
+# Manifest
+1. 作用：存储`sst`文件层级信息的元数据文件，因此在flush（新建sst文件），merge（sst文件合并时），都需要对manifest进行更新
