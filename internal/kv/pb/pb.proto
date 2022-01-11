@@ -17,3 +17,18 @@ message TableIndex{
   uint32 keyCount = 4;
   uint32 staleDataSize = 5;
 }
+
+message ManifestModifies {
+        repeated ManifestModify modifies = 1;
+}
+
+message ManifestModify {
+        uint64 Id = 1;
+        enum Operation {
+                CREATE = 0;
+                DELETE = 1;
+        }
+        Operation Op   = 2;
+        uint32 Level   = 3; // Only used for CREATE
+        bytes Checksum = 4; // Only used for CREATE
+}

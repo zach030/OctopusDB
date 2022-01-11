@@ -21,6 +21,7 @@ Separating Keys from Values. Distributed Database System. Support Graph Query.
    
 # Manifest
 1. 作用：存储`sst`文件层级信息的元数据文件，因此在flush（新建sst文件），merge（sst文件合并时），都需要对manifest进行更新
+2. 单独使用此类型文件来记录`sst`的元信息，也是为了加快数据库的恢复
 
 # 布隆过滤器
 1. 作用：判断key是否存在某个`sst`文件中，避免每次都将文件读取到内存中处理
