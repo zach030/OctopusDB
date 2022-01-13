@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package pb;
 
-option go_package = "./";
-
 message BlockOffset{
   bytes key = 1;
   uint32 offset = 2;

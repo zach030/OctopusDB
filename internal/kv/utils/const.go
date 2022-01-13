@@ -9,3 +9,8 @@ const (
 	ManifestFileName   = "manifest"
 	ReManifestFileName = "remanifest"
 )
+
+var (
+	MagicText    = [4]byte{'O', 'C', 'T', 'O'}
+	MagicVersion = uint32(1)
+)
