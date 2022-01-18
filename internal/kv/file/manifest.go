@@ -1,11 +1,15 @@
 package file
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/pkg/errors"
 
 	"github.com/zach030/OctopusDB/internal/kv/pb"
 
@@ -22,8 +26,10 @@ type ManifestFile struct {
 // 磁盘存储结构： magic-num | version | length change | crc   | change
 //                 32 bit |  32bit  |   32 bit      | 32bit | ...
 type Manifest struct {
-	Levels []LevelManifest          // 每个level的table集合
-	Tables map[uint64]TableManifest // tableID--{level,crc}的映射
+	Levels    []LevelManifest          // 每个level的table集合
+	Tables    map[uint64]TableManifest // tableID--{level,crc}的映射
+	Creations int
+	Deletions int
 }
 
 type (
@@ -63,10 +69,22 @@ func OpenManifestFile(opt *Option) (*ManifestFile, error) {
 		return nil, err
 	}
 	// 如果manifest文件之前存在，需要重放记录sst文件层级信息
-	ma, err := ReplayManifest(f)
+	ma, offset, err := ReplayManifest(f)
 	if err != nil {
-
+		_ = f.Close()
+		return mf, err
 	}
+	// todo what's truncate?
+	// Truncate file so we don't have a half-written entry at the end.
+	if err := f.Truncate(offset); err != nil {
+		_ = f.Close()
+		return mf, err
+	}
+	if _, err = f.Seek(0, io.SeekEnd); err != nil {
+		_ = f.Close()
+		return mf, err
+	}
+	mf.f = f
 	mf.manifest = ma
 	return mf, nil
 }
@@ -147,6 +165,86 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, error) {
 	return fp, nil
 }
 
-func ReplayManifest(f *os.File) (*Manifest, error) {
-	return nil, nil
+func ReplayManifest(f *os.File) (*Manifest, int64, error) {
+	reader := bufio.NewReader(f)
+	var magicBuf [8]byte
+	if _, err := reader.Read(magicBuf[:]); err != nil {
+		return &Manifest{}, 0, err
+	}
+	if !bytes.Equal(magicBuf[0:4], utils.MagicText[:]) {
+		return &Manifest{}, 0, errors.New("incorrect magic version")
+	}
+	if v := binary.BigEndian.Uint32(magicBuf[4:8]); v != utils.MagicVersion {
+		return &Manifest{}, 0, errors.New("incorrect version")
+	}
+	var offset = int64(8)
+	m := newManifest()
+	for {
+		var lenCrcBuf [8]byte
+		if _, err := reader.Read(lenCrcBuf[:]); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return &Manifest{}, 0, err
+		}
+		offset += int64(len(lenCrcBuf))
+		lengthOfChange := binary.BigEndian.Uint32(lenCrcBuf[0:4])
+		crc := binary.BigEndian.Uint32(lenCrcBuf[4:8])
+		change := make([]byte, lengthOfChange)
+		if _, err := reader.Read(change); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return &Manifest{}, 0, err
+		}
+		offset += int64(lengthOfChange)
+		if crc32.Checksum(change, utils.CastagnoliCrcTable) != crc {
+			return &Manifest{}, 0, errors.New("invalid crc")
+		}
+		var changes pb.ManifestModifies
+		if err := changes.Unmarshal(change); err != nil {
+			return &Manifest{}, 0, err
+		}
+		if err := m.applyModifies(changes); err != nil {
+			return &Manifest{}, 0, err
+		}
+	}
+	return m, offset, nil
+}
+
+func (m *Manifest) applyModifies(modifies pb.ManifestModifies) error {
+	for _, modify := range modifies.Modifies {
+		if err := m.applyModify(modify); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manifest) applyModify(modify *pb.ManifestModify) error {
+	switch modify.Op {
+	case pb.ManifestModify_CREATE:
+		if _, ok := m.Tables[modify.Id]; !ok {
+			return errors.Errorf("not found new table")
+		}
+		m.Tables[modify.Id] = TableManifest{
+			Level:    uint8(modify.Level),
+			CheckSum: modify.Checksum,
+		}
+		for len(m.Levels) <= int(modify.Level) {
+			m.Levels = append(m.Levels, LevelManifest{Tables: make(map[uint64]struct{})})
+		}
+		m.Levels[modify.Level].Tables[modify.Id] = struct{}{}
+		m.Creations++
+	case pb.ManifestModify_DELETE:
+		if _, ok := m.Tables[modify.Id]; !ok {
+			return errors.Errorf("not found table")
+		}
+		delete(m.Tables, modify.Id)
+		delete(m.Levels[modify.Level].Tables, modify.Id)
+		m.Deletions++
+	default:
+		return errors.Errorf("invalid modify type")
+	}
+	return nil
 }
