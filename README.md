@@ -27,3 +27,15 @@ Separating Keys from Values. Distributed Database System. Support Graph Query.
 # 布隆过滤器
 1. 作用：判断key是否存在某个`sst`文件中，避免每次都将文件读取到内存中处理
 2. false positive: 为1不一定存在，为0一定不存在
+
+# 完整的一次查询流程
+> 终于把整个查询的流程主体写完了！:)
+
+![get-flow](doc/lsm/Get-flow.jpeg)
+详细流程如图所示：
+1. 首先是DB层面的`OctopusDB.Get()`
+2. 调用底层`lsm`的查询，这里如果是`big value`，根据kv分离的思路还需要再查询`vlog(TODO)`
+3. 在`lsm`层的查询，首先查内存活跃`memtable`，如果查不到再查`immemtable`，这两者都是内存跳表结构，底层就是跳表的查询流程
+4. 如果内存中不存在，则需要进入`disk level`查询，调用`levelManager.Get()`
+5. `level`层的查询统一交给`level-handler`,会根据当前的`level`，选择是从`l0`还是`ln`层查询
+6. `level`中的查询调用的是对`sst`读写封装的`table`，每次都在磁盘上进行查询

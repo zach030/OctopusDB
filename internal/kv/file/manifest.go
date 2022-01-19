@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
@@ -94,6 +95,10 @@ func newManifest() *Manifest {
 		Levels: make([]LevelManifest, 0),
 		Tables: make(map[uint64]TableManifest),
 	}
+}
+
+func (f *ManifestFile) Manifest() *Manifest {
+	return f.manifest
 }
 
 func (m *Manifest) GetModifies() []*pb.ManifestModify {
@@ -210,6 +215,28 @@ func ReplayManifest(f *os.File) (*Manifest, int64, error) {
 		}
 	}
 	return m, offset, nil
+}
+
+// FilterValidTables 用来将磁盘中存储的sst文件集合与内存中的manifest进行对比过滤
+// 两个集合：manifest，sst目录下集合
+// 以manifest为基准，保证manifest中的所有文件都存在：如果出现某table存在于manifest中，但是磁盘中并不存在此sst文件，返回error
+// 如果manifest中多了，需要将多余的文件删除
+func (f *ManifestFile) FilterValidTables(ids map[uint64]struct{}) error {
+	for id := range f.manifest.Tables {
+		if _, ok := ids[id]; !ok {
+			return fmt.Errorf("file not exist for table:%v", id)
+		}
+	}
+	for id := range ids {
+		if _, ok := f.manifest.Tables[id]; !ok {
+			// need to delete
+			fname := utils.SSTFullFileName(f.option.Dir, id)
+			if err := os.Remove(fname); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Manifest) applyModifies(modifies pb.ManifestModifies) error {

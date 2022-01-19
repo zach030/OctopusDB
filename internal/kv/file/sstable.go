@@ -107,3 +107,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	}
 	return nil, errors.New("offset is nil")
 }
+
+func (s SSTable) MinKey() []byte {
+	return s.minKey
+}
