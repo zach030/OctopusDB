@@ -1,7 +1,10 @@
 package lsm
 
 import (
+	"bytes"
 	"sort"
+
+	"github.com/pkg/errors"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -21,14 +24,34 @@ func (h *levelHandler) Get(key []byte) (*utils.Entry, error) {
 
 func (h *levelHandler) SearchL0(key []byte) (*utils.Entry, error) {
 	// todo 调用table中的查询
+	var version uint64
 	for _, t := range h.tables {
-		t.Search()
+		if entry, err := t.Search(key, &version); err == nil {
+			return entry, nil
+		}
 	}
-	return nil, nil
+	return nil, errors.New("key not found")
 }
 
 func (h *levelHandler) SearchLN(key []byte) (*utils.Entry, error) {
-	return nil, nil
+	tbl := h.getTable(key)
+	if tbl == nil {
+		return nil, errors.New("key not found")
+	}
+	var version uint64
+	if entry, err := tbl.Search(key, &version); err == nil {
+		return entry, nil
+	}
+	return nil, errors.New("key not found")
+}
+
+func (h *levelHandler) getTable(key []byte) *table {
+	for i := 0; i < len(h.tables); i++ {
+		if bytes.Compare(key, h.tables[i].sst.MinKey()) > -1 && bytes.Compare(key, h.tables[i].sst.MaxKey()) < 1 {
+			return h.tables[i]
+		}
+	}
+	return nil
 }
 
 func (h *levelHandler) Sort() {

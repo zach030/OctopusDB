@@ -111,3 +111,11 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 func (s SSTable) MinKey() []byte {
 	return s.minKey
 }
+
+func (s SSTable) MaxKey() []byte {
+	return s.maxKey
+}
+
+func (s SSTable) HasBloomFilter() bool {
+	return s.hasBloomFilter
+}
