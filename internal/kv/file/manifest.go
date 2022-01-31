@@ -275,3 +275,24 @@ func (m *Manifest) applyModify(modify *pb.ManifestModify) error {
 	}
 	return nil
 }
+
+func newCreateChange(id uint64, level int, checksum []byte) *pb.ManifestModify {
+	return &pb.ManifestModify{
+		Id:       id,
+		Op:       pb.ManifestModify_CREATE,
+		Level:    uint32(level),
+		Checksum: checksum,
+	}
+}
+
+func (f *ManifestFile) addChanges(changesParam []*pb.ManifestModify) error {
+	return nil
+}
+
+// AddTableMeta 存储level表到manifest的level中
+func (f *ManifestFile) AddTableMeta(levelNum int, t *TableMeta) (err error) {
+	err = f.addChanges([]*pb.ManifestModify{
+		newCreateChange(t.ID, levelNum, t.CheckSum),
+	})
+	return err
+}

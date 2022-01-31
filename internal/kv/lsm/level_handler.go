@@ -3,16 +3,25 @@ package lsm
 import (
 	"bytes"
 	"sort"
+	"sync"
 
 	"github.com/pkg/errors"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
+// levelHandler 管理每一层的元数据
 type levelHandler struct {
-	level   int
-	tables  []*table
-	manager *LevelManager
+	sync.RWMutex
+	level          int
+	totalSize      int64
+	totalStaleSize int64
+	tables         []*table
+	manager        *LevelManager
+}
+
+func (h *levelHandler) close() error {
+	return nil
 }
 
 func (h *levelHandler) Get(key []byte) (*utils.Entry, error) {
@@ -65,4 +74,59 @@ func (h *levelHandler) Sort() {
 			return utils.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
 		})
 	}
+}
+
+// add table to this level
+func (h *levelHandler) add(t *table) {
+	h.Lock()
+	defer h.Unlock()
+	h.tables = append(h.tables, t)
+}
+
+// batchAdd batch add tables to this level
+func (h *levelHandler) batchAdd(ts []*table) {
+	h.Lock()
+	defer h.Unlock()
+	h.tables = append(h.tables, ts...)
+}
+
+func (h *levelHandler) getTotalSize() int64 {
+	h.Lock()
+	defer h.Unlock()
+	return h.totalSize
+}
+
+func (h *levelHandler) addSize(t *table) {
+	h.totalSize += t.Size()
+	h.totalStaleSize += int64(t.StaleSize())
+}
+
+func (h *levelHandler) subtractSize(t *table) {
+	h.totalSize -= t.Size()
+	h.totalStaleSize -= int64(t.StaleSize())
+}
+
+func (h *levelHandler) tableNums() int {
+	h.Lock()
+	defer h.Unlock()
+	return len(h.tables)
+}
+
+func (h *levelHandler) deleteTables(ts []*table) error {
+	h.Lock()
+	deleteMap := make(map[uint64]struct{})
+	for _, t := range ts {
+		deleteMap[t.fid] = struct{}{}
+	}
+	newTbls := make([]*table, 0)
+	for _, t := range h.tables {
+		if _, ok := deleteMap[t.fid]; !ok {
+			newTbls = append(newTbls, t)
+		} else {
+			h.subtractSize(t)
+		}
+	}
+	h.tables = newTbls
+	h.Unlock()
+	return decrRefs(ts)
 }

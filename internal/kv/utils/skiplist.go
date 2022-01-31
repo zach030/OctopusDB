@@ -177,10 +177,27 @@ func (s *SkipListIterator) Close() error {
 func (s *SkipListIterator) Seek(bytes []byte) {
 }
 
+func (s *SkipListIterator) Item() Item {
+	//vo, vs := decodeValue(s.ele.)
+	// todo add arena for skip-list
+	return &Entry{}
+}
+
+func encodeValue(valOffset uint32, valSize uint32) uint64 {
+	return uint64(valSize)<<32 | uint64(valOffset)
+}
+
+func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
+	valOffset = uint32(value)
+	valSize = uint32(value >> 32)
+	return
+}
+
 type Element struct {
 	levels []*Element
 	entry  *Entry
 	score  float64
+	value  uint64 //将value的off和size组装成一个uint64，实现原子化的操作
 }
 
 func newElement(level int, score float64, entry *Entry) *Element {

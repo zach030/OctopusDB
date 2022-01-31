@@ -76,13 +76,27 @@ func (l *LevelManager) build() error {
 
 // flush if memtable size over limit, flush it to disk L0 as sst file
 func (l *LevelManager) flush(immutable *MemTable) error {
+	// 分配一个fid
 	fid := immutable.wal.FID()
 	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
 	fmt.Println("new sst file:", sstName)
+	// 构建table-builder
+	builder := newTableBuilder(l.cfg)
+	// 更新manifest
 	iter := immutable.skipList.NewIterator()
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		//
+		entry := iter.Item()
+		builder.add(entry.Entry(), false)
 	}
+	tbl := openTable(l, sstName, builder)
+	if err := l.manifestFile.AddTableMeta(0, &file.TableMeta{
+		ID:       fid,
+		CheckSum: []byte{'m', 'o', 'c', 'k'},
+	}); err != nil {
+		panic(err)
+	}
+	// flush to level-0
+	l.levels[0].add(tbl)
 	return nil
 }
 

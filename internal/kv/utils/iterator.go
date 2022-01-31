@@ -6,6 +6,7 @@ type Iterator interface {
 	Valid() bool
 	Close() error
 	Seek([]byte)
+	Item() Item
 }
 
 type Item interface {

@@ -108,14 +108,26 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	return nil, errors.New("offset is nil")
 }
 
-func (s SSTable) MinKey() []byte {
+func (s *SSTable) MinKey() []byte {
 	return s.minKey
 }
 
-func (s SSTable) MaxKey() []byte {
+func (s *SSTable) MaxKey() []byte {
 	return s.maxKey
 }
 
-func (s SSTable) HasBloomFilter() bool {
+func (s *SSTable) HasBloomFilter() bool {
 	return s.hasBloomFilter
+}
+
+func (s *SSTable) Size() int64 {
+	stat, err := s.mf.Fd.Stat()
+	if err != nil {
+		panic(err)
+	}
+	return stat.Size()
+}
+
+func (s *SSTable) Index() *pb.TableIndex {
+	return s.tableIdx
 }

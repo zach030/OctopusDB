@@ -18,9 +18,6 @@ type table struct {
 	ref     int32
 }
 
-type tableBuilder struct {
-}
-
 type tableIterator struct {
 	it       utils.Item
 	opt      *utils.Options
@@ -62,6 +59,23 @@ func (t *table) IncrRef() {
 	atomic.AddInt32(&t.ref, 1)
 }
 
-func (t *table) DecrRef() {
+func (t *table) DecrRef() error {
+	return nil
+}
 
+func (t *table) Size() int64 {
+	return t.sst.Size()
+}
+
+func (t *table) StaleSize() uint32 {
+	return t.sst.Index().StaleDataSize
+}
+
+func decrRefs(tables []*table) error {
+	for _, table := range tables {
+		if err := table.DecrRef(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
