@@ -16,7 +16,7 @@ type Arena struct {
 	buf    []byte
 }
 
-func newArena(n int) *Arena {
+func newArena(n int64) *Arena {
 	return &Arena{
 		offset: 1,
 		buf:    make([]byte, n),
@@ -35,7 +35,9 @@ func (s *Arena) allocate(sz uint32) uint32 {
 			grow = sz
 		}
 		newBuf := make([]byte, len(s.buf)+int(grow))
-		copy(newBuf, s.buf)
+		if len(s.buf) != copy(newBuf, s.buf) {
+			panic("assert buffer grow panic")
+		}
 		s.buf = newBuf
 	}
 	return offset - sz
@@ -48,4 +50,58 @@ func (s *Arena) putNode(height int) uint32 {
 	n := s.allocate(l)
 	m := (n + uint32(nodeAlign)) & ^uint32(nodeAlign)
 	return m
+}
+
+// putKey put key into arena
+func (s *Arena) putKey(key []byte) uint32 {
+	size := uint32(len(key))
+	offset := s.allocate(size)
+	buf := s.buf[offset : offset+size]
+	if len(key) != copy(buf, key) {
+		panic("assert buffer copy panic")
+	}
+	return offset
+}
+
+// putVal get encoded size of value-struct, allocate in arena and put val in buf
+func (s *Arena) putVal(val ValueStruct) uint32 {
+	size := val.EncodedSize()
+	offset := s.allocate(size)
+	val.EncodeValue(s.buf[offset:])
+	return offset
+}
+
+// getElement get element by given address
+func (s *Arena) getElement(offset uint32) *Element {
+	if offset == 0 {
+		return nil
+	}
+	return (*Element)(unsafe.Pointer(&s.buf[offset]))
+}
+
+func (s *Arena) getKey(offset uint32, size uint16) []byte {
+	return s.buf[offset : offset+uint32(size)]
+}
+
+func (s *Arena) getVal(offset uint32, size uint32) ValueStruct {
+	val := s.buf[offset : offset+size]
+	var vs ValueStruct
+	vs.DecodeValue(val)
+	return vs
+}
+
+// getElementOffset 获取在arena中的偏移量
+func (s *Arena) getElementOffset(e *Element) uint32 {
+	if e == nil {
+		return 0
+	}
+	return uint32(uintptr(unsafe.Pointer(e)) - uintptr(unsafe.Pointer(&s.buf[0])))
+}
+
+func (e *Element) getNextOffset(h int) uint32 {
+	return atomic.LoadUint32(&e.levels[h])
+}
+
+func (s *Arena) Size() int64 {
+	return int64(atomic.LoadUint32(&s.offset))
 }

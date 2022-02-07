@@ -39,7 +39,10 @@ type header struct {
 }
 
 func newTableBuilder(cfg *Config) *tableBuilder {
-	return &tableBuilder{}
+	return &tableBuilder{
+		cfg:     cfg,
+		sstSize: cfg.SSTableMaxSz,
+	}
 }
 
 func (t *tableBuilder) add(e *utils.Entry, isStale bool) {

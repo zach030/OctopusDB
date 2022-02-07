@@ -1,6 +1,48 @@
 package utils
 
-import "time"
+import (
+	"encoding/binary"
+	"time"
+)
+
+// ValueStruct 将value与expiresAt作为一个整体
+type ValueStruct struct {
+	Value     []byte
+	ExpiresAt uint64
+}
+
+// EncodedSize value只持久化具体的value值和过期时间
+func (vs *ValueStruct) EncodedSize() uint32 {
+	sz := len(vs.Value)
+	enc := sizeVarint(vs.ExpiresAt)
+	return uint32(sz + enc)
+}
+
+// DecodeValue 反序列化到结构体
+func (vs *ValueStruct) DecodeValue(buf []byte) {
+	var sz int
+	vs.ExpiresAt, sz = binary.Uvarint(buf)
+	vs.Value = buf[sz:]
+}
+
+//EncodeValue 对value进行编码，并将编码后的字节写入byte
+func (vs *ValueStruct) EncodeValue(b []byte) uint32 {
+	// 过期时间 | value
+	sz := binary.PutUvarint(b[:], vs.ExpiresAt)
+	n := copy(b[sz:], vs.Value)
+	return uint32(sz + n)
+}
+
+func sizeVarint(x uint64) (n int) {
+	for {
+		n++
+		x >>= 7
+		if x == 0 {
+			break
+		}
+	}
+	return n
+}
 
 type Entry struct {
 	Key       []byte
@@ -13,11 +55,6 @@ func NewEntry(key, value []byte) *Entry {
 		Key:   key,
 		Value: value,
 	}
-}
-
-type ValueStruct struct {
-	Value     []byte
-	ExpiresAt uint64
 }
 
 func (e Entry) Size() int64 {

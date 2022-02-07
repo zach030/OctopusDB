@@ -8,7 +8,7 @@ import (
 )
 
 func TestSkipListAdd(t *testing.T) {
-	sl := NewSkipList()
+	sl := NewSkipList(1000)
 	e1 := &Entry{Key: []byte("k1"), Value: []byte("v1")}
 	e2 := &Entry{Key: []byte("k1"), Value: []byte("v1")}
 	err := sl.Add(e1)
@@ -25,7 +25,7 @@ func TestSkipListAdd(t *testing.T) {
 }
 
 func TestSkipListSearch(t *testing.T) {
-	sl := NewSkipList()
+	sl := NewSkipList(1000)
 	e1 := &Entry{Key: []byte("k1"), Value: []byte("v1")}
 	e2 := &Entry{Key: []byte("k2"), Value: []byte("v2")}
 	err := sl.Add(e1)
@@ -41,7 +41,7 @@ func TestSkipListSearch(t *testing.T) {
 }
 
 func TestSkipListErr(t *testing.T) {
-	sl := NewSkipList()
+	sl := NewSkipList(1000)
 	e1 := &Entry{Key: []byte("k1"), Value: []byte("v1")}
 	e2 := &Entry{Key: []byte("k2"), Value: []byte("v2")}
 	err := sl.Add(e1)
@@ -56,7 +56,7 @@ func TestSkipListErr(t *testing.T) {
 }
 
 func BenchmarkSkipList_AddSearch(b *testing.B) {
-	sl := NewSkipList()
+	sl := NewSkipList(1000)
 	for i := 0; i < b.N; i++ {
 		key := []byte(fmt.Sprintf("key-%v", i))
 		value := []byte(fmt.Sprintf("value-%v", i))
