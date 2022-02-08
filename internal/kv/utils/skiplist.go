@@ -156,6 +156,10 @@ func (s *SkipList) randLevel() int {
 	return i
 }
 
+func (s *SkipList) Close() error {
+	return nil
+}
+
 type SkipListIterator struct {
 	ele *Element  // 当前所持有的元素
 	sl  *SkipList // 跳表

@@ -39,3 +39,7 @@ Separating Keys from Values. Distributed Database System. Support Graph Query.
 4. 如果内存中不存在，则需要进入`disk level`查询，调用`levelManager.Get()`
 5. `level`层的查询统一交给`level-handler`,会根据当前的`level`，选择是从`l0`还是`ln`层查询
 6. `level`中的查询调用的是对`sst`读写封装的`table`，每次都在磁盘上进行查询
+
+# 完整的一次写入流程
+1. 首先是DB层面的`OctopusDB.Set()`
+2. 

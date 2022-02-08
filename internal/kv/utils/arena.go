@@ -11,6 +11,7 @@ const (
 	nodeAlign = int(unsafe.Sizeof(uint64(0))) - 1
 )
 
+// Arena 内存管理模块，分配一整块内存buf，对应memetable，当此buf分配完时对应memtable-->immemtable的转换
 type Arena struct {
 	offset uint32
 	buf    []byte

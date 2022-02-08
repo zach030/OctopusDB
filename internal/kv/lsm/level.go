@@ -44,7 +44,6 @@ func (l *LevelManager) loadManifest() error {
 }
 
 func (l *LevelManager) build() error {
-	// todo 构建levelhandler
 	l.levels = make([]*levelHandler, 0, l.cfg.MaxLevelNums)
 	for i := 0; i < len(l.levels); i++ {
 		l.levels = append(l.levels, &levelHandler{

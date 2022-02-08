@@ -17,10 +17,11 @@ const (
 )
 
 type MemTable struct {
-	lsm      *LSM
-	wal      *file.Wal
-	skipList *utils.SkipList
-	buf      *bytes.Buffer
+	lsm        *LSM
+	wal        *file.Wal
+	skipList   *utils.SkipList
+	buf        *bytes.Buffer
+	maxVersion uint64
 }
 
 // NewMemTable 当内存中memtable已满时，创建新的内存索引
@@ -36,7 +37,7 @@ func (l *LSM) NewMemTable() *MemTable {
 	mt := &MemTable{
 		wal:      file.OpenWalFile(opt),
 		lsm:      l,
-		skipList: utils.NewSkipList(),
+		skipList: utils.NewSkipList(int64(1 << 20)),
 	}
 	return mt
 }
@@ -50,7 +51,7 @@ func (l *LSM) openMemTable(fid uint64) *MemTable {
 		Flag:     os.O_CREATE | os.O_RDWR,
 		MaxSz:    int(l.cfg.MemTableSize),
 	}
-	s := utils.NewSkipList()
+	s := utils.NewSkipList(int64(1 << 20))
 	mt := &MemTable{
 		skipList: s,
 		buf:      &bytes.Buffer{},
@@ -83,8 +84,28 @@ func (m *MemTable) refreshSkipList() error {
 	if m.wal == nil || m.skipList == nil {
 		return errors.New("")
 	}
+
 	// todo 遍历wal文件，写入skiplist
 	return nil
+}
+
+func (m *MemTable) Close() error {
+	if err := m.wal.Close(); err != nil {
+		return err
+	}
+	if err := m.skipList.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MemTable) replayFunction(opt *Config) func(*utils.Entry, *utils.ValuePtr) error {
+	return func(e *utils.Entry, _ *utils.ValuePtr) error { // Function for replaying.
+		if ts := utils.ParseTimeStamp(e.Key); ts > m.maxVersion {
+			m.maxVersion = ts
+		}
+		return m.skipList.Add(e)
+	}
 }
 
 func memTableFilePath(dir string, fid uint64) string {

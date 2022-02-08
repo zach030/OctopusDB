@@ -50,3 +50,15 @@ func (w *Wal) Size() uint32 {
 func (w *Wal) FID() uint64 {
 	return w.opt.FID
 }
+
+func (w *Wal) Name() string {
+	return w.file.Fd.Name()
+}
+
+func (w *Wal) Close() error {
+	fileName := w.file.Fd.Name()
+	if err := w.file.Fd.Close(); err != nil {
+		return err
+	}
+	return os.Remove(fileName)
+}

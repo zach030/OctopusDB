@@ -22,3 +22,5 @@ func (h WalHeader) Encode(out []byte) int {
 func WalCodec(buf *bytes.Buffer, entry *Entry) int {
 	return 0
 }
+
+type LogEntry func(e *Entry, vp *ValuePtr) error

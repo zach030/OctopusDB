@@ -50,10 +50,10 @@ func (o *OctopusDB) Set(data *utils.Entry) error {
 		}
 	}
 	if valuePtr != nil {
-
+		data.Value = utils.ValuePtrCodec(valuePtr)
 	}
-	return o.lsm.Set(data)
 	// 3. 将记录写入lsm
+	return o.lsm.Set(data)
 }
 
 func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
@@ -66,9 +66,11 @@ func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
 	if entry, err = o.lsm.Get(key); err == nil {
 		return entry, nil
 	}
-	// 判断是否存vlog
-	if entry, err = o.vlog.Get(entry); err == nil {
-		return entry, nil
+	// 3. 判断是否存vlog
+	if entry != nil && utils.IsValuePtr(entry) {
+		if entry, err = o.vlog.Get(entry); err == nil {
+			return entry, nil
+		}
 	}
 	return nil, nil
 }
@@ -90,5 +92,14 @@ func (o *OctopusDB) Info() *stat {
 }
 
 func (o *OctopusDB) Close() error {
+	if err := o.lsm.Close(); err != nil {
+		return err
+	}
+	if err := o.vlog.Close(); err != nil {
+		return err
+	}
+	if err := o.stat.Close(); err != nil {
+		return err
+	}
 	return nil
 }

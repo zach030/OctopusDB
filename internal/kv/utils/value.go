@@ -9,3 +9,11 @@ type ValuePtr struct {
 func NewValuePtr(entry *Entry) *ValuePtr {
 	return &ValuePtr{}
 }
+
+func IsValuePtr(entry *Entry) bool {
+	return false
+}
+
+func ValuePtrCodec(vp *ValuePtr) []byte {
+	return []byte{}
+}

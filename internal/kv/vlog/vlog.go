@@ -24,3 +24,7 @@ func (v *VLog) Get(entry *utils.Entry) (*utils.Entry, error) {
 	// valuePtr := utils.ValuePtrDecode(entry.Value)
 	return nil, nil
 }
+
+func (v *VLog) Close() error {
+	return nil
+}

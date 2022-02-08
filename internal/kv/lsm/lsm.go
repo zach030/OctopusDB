@@ -54,6 +54,9 @@ func (l *LSM) Set(entry *utils.Entry) error {
 		if err := l.levels.flush(immt); err != nil {
 			return err
 		}
+		if err := immt.Close(); err != nil {
+			return err
+		}
 	}
 	l.imMemTable = make([]*MemTable, 0)
 	return nil
