@@ -19,7 +19,7 @@ type Wal struct {
 }
 
 func OpenWalFile(opt *Option) *Wal {
-	mf, err := OpenMmapFileWithName(opt.FileName, os.O_CREATE|os.O_RDWR, opt.MaxSz)
+	mf, err := OpenMmapFile(opt.FileName, os.O_CREATE|os.O_RDWR, opt.MaxSz)
 	if err != nil {
 		return nil
 	}

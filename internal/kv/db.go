@@ -24,6 +24,7 @@ type OctopusDB struct {
 
 func Open(opt *Options) *OctopusDB {
 	db := &OctopusDB{opt: opt}
+	// todo 目录锁
 	db.lsm = lsm.NewLSM(&lsm.Config{
 		WorkDir:            opt.WorkDir,
 		MemTableSize:       opt.MemTableSize,

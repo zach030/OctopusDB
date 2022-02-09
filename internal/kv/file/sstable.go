@@ -27,7 +27,7 @@ type SSTable struct {
 }
 
 func OpenSSTable(option *Option) *SSTable {
-	mf, err := OpenMmapFileWithName(option.FileName, os.O_CREATE|os.O_RDWR, option.MaxSz)
+	mf, err := OpenMmapFile(option.FileName, os.O_CREATE|os.O_RDWR, option.MaxSz)
 	if err != nil {
 		return nil
 	}
