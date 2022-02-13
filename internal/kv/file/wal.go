@@ -1,7 +1,9 @@
 package file
 
 import (
+	"bufio"
 	"bytes"
+	"io"
 	"os"
 	"sync"
 
@@ -32,14 +34,14 @@ func OpenWalFile(opt *Option) *Wal {
 func (w *Wal) Write(entry *utils.Entry) error {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-	// 将entry序列化
+	// 将entry序列化,存到buf中 获取编码后的长度n
 	n := utils.WalCodec(w.buf, entry)
 	buf := w.buf.Bytes()
+	// 将序列化后的buf写入mmap
 	if err := w.file.AppendBuffer(w.writeAt, buf); err != nil {
 		panic(err)
 	}
 	w.writeAt += uint32(n)
-	// 将处理后的entry放入buf
 	return nil
 }
 
@@ -61,4 +63,34 @@ func (w *Wal) Close() error {
 		return err
 	}
 	return os.Remove(fileName)
+}
+
+// Iterate 从磁盘中遍历wal获取数据
+// fn : 拿到entry后做的工作
+func (w *Wal) Iterate(readonly bool, offset uint32, fn utils.LogEntry) error {
+	reader := bufio.NewReader(w.file.NewReader(int(offset)))
+	read := SafeRead{
+		K:            make([]byte, 10),
+		V:            make([]byte, 10),
+		RecordOffset: offset,
+		LF:           w,
+	}
+}
+
+type SafeRead struct {
+	K []byte
+	V []byte
+
+	RecordOffset uint32
+	LF           *Wal
+}
+
+func (r *SafeRead) MakeEntry(reader io.Reader) (*utils.Entry, error) {
+	hashReader := utils.NewHashReader(reader)
+	var h utils.WalHeader
+	hlen, err := h.Decode(hashReader)
+	if err != nil {
+		return nil, err
+	}
+
 }

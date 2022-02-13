@@ -48,6 +48,11 @@ type Entry struct {
 	Key       []byte
 	Value     []byte
 	ExpiresAt uint64
+
+	Version      uint64
+	Offset       uint32
+	Hlen         int // Length of the header.
+	ValThreshold int64
 }
 
 func NewEntry(key, value []byte) *Entry {
@@ -72,4 +77,19 @@ func (e *Entry) WithTTL(duration time.Duration) *Entry {
 
 func ValueSize(data []byte) int64 {
 	return int64(len(data))
+}
+
+// IsZero _
+func (e *Entry) IsZero() bool {
+	return len(e.Key) == 0
+}
+
+// LogHeaderLen _
+func (e *Entry) LogHeaderLen() int {
+	return e.Hlen
+}
+
+// LogOffset _
+func (e *Entry) LogOffset() uint32 {
+	return e.Offset
 }

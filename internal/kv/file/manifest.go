@@ -75,7 +75,6 @@ func OpenManifestFile(opt *Option) (*ManifestFile, error) {
 		_ = f.Close()
 		return mf, err
 	}
-	// todo what's truncate?
 	// Truncate file so we don't have a half-written entry at the end.
 	if err := f.Truncate(offset); err != nil {
 		_ = f.Close()
