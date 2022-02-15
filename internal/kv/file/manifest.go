@@ -67,7 +67,7 @@ func OpenManifestFile(opt *Option) (*ManifestFile, error) {
 		}
 		mf.f = fp
 		mf.manifest = m
-		return nil, err
+		return mf, nil
 	}
 	// 如果manifest文件之前存在，需要重放记录sst文件层级信息
 	ma, offset, err := ReplayManifest(f)
@@ -133,9 +133,11 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, error) {
 		f.Close()
 		return nil, err
 	}
+	var crcBuf [8]byte
 	// length of modify | crc
-	binary.BigEndian.PutUint32(buf[8:12], uint32(len(modifyBuf)))
-	binary.BigEndian.PutUint32(buf[12:16], crc32.Checksum(modifyBuf, utils.CastagnoliCrcTable))
+	binary.BigEndian.PutUint32(crcBuf[0:4], uint32(len(modifyBuf)))
+	binary.BigEndian.PutUint32(crcBuf[4:8], crc32.Checksum(modifyBuf, utils.CastagnoliCrcTable))
+	buf = append(buf, crcBuf[:]...)
 	buf = append(buf, modifyBuf...)
 	if _, err := f.Write(buf); err != nil {
 		f.Close()

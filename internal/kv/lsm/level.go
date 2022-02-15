@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-
+	"github.com/prometheus/common/log"
 	"github.com/zach030/OctopusDB/internal/kv/file"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -40,6 +40,7 @@ func (l *LevelManager) loadManifest() error {
 		return err
 	}
 	l.manifestFile = mf
+	log.Info("success load manifest-file")
 	return nil
 }
 
@@ -70,6 +71,7 @@ func (l *LevelManager) build() error {
 		l.levels[i].Sort()
 	}
 	atomic.AddUint64(&l.maxFID, maxFd)
+	log.Info("success build level-manager")
 	return nil
 }
 

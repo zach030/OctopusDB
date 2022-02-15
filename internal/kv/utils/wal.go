@@ -90,10 +90,9 @@ type HashReader struct {
 }
 
 func NewHashReader(r io.Reader) *HashReader {
-	hash := crc32.New(CastagnoliCrcTable)
 	return &HashReader{
 		R: r,
-		H: hash,
+		H: crc32.New(CastagnoliCrcTable),
 	}
 }
 

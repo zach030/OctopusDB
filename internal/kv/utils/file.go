@@ -23,6 +23,10 @@ func BytesToU64(b []byte) uint64 {
 	return binary.BigEndian.Uint64(b)
 }
 
+func BytesToU32(b []byte) uint32 {
+	return binary.BigEndian.Uint32(b)
+}
+
 // VerifyChecksum crc32
 func VerifyChecksum(data []byte, expected []byte) error {
 	actual := uint64(crc32.Checksum(data, CastagnoliCrcTable))

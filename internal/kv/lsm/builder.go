@@ -41,7 +41,7 @@ type header struct {
 func newTableBuilder(cfg *Config) *tableBuilder {
 	return &tableBuilder{
 		cfg:     cfg,
-		sstSize: cfg.SSTableMaxSz,
+		sstSize: cfg.SSTableMaxSz, // sst max size
 	}
 }
 
@@ -67,11 +67,11 @@ func (t *tableBuilder) add(e *utils.Entry, isStale bool) {
 
 	t.curBlock.entryOffsets = append(t.curBlock.entryOffsets, uint32(t.curBlock.end))
 
-	//t.append(h.encode())
-	//t.append(diffKey)
+	t.append(h.encode())
+	t.append(diffKey)
 
-	//dst := t.allocate(int(val.EncodedSize()))
-	//val.EncodeValue(dst)
+	dst := t.allocate(int(val.EncodedSize()))
+	val.EncodeValue(dst)
 }
 
 func (t *tableBuilder) flush(lm *LevelManager, tableName string) (tbl *table, err error) {
@@ -90,4 +90,11 @@ func (t *tableBuilder) keyDiff(newKey []byte) []byte {
 
 func (t *tableBuilder) append(data []byte) {
 
+}
+
+func (tb *tableBuilder) done() buildData {
+	bd := buildData{
+		blockList: tb.blockList,
+	}
+	return bd
 }

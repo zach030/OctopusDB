@@ -4,6 +4,8 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/prometheus/common/log"
+
 	"github.com/pkg/errors"
 
 	"github.com/zach030/OctopusDB/internal/kv/file"
@@ -23,21 +25,81 @@ type tableIterator struct {
 	opt      *utils.Options
 	t        *table
 	blockPos int
-	// bi       *blockIterator
-	err error
+	bi       *blockIterator
+	err      error
+}
+
+func (t tableIterator) Next() {
+	panic("implement me")
+}
+
+func (t tableIterator) Rewind() {
+	panic("implement me")
+}
+
+func (t tableIterator) Valid() bool {
+	panic("implement me")
+}
+
+func (t tableIterator) Close() error {
+	panic("implement me")
+}
+
+func (t tableIterator) Seek(bytes []byte) {
+	panic("implement me")
+}
+
+func (t tableIterator) Item() utils.Item {
+	panic("implement me")
+}
+
+type blockIterator struct {
+	data         []byte
+	idx          int
+	err          error
+	baseKey      []byte
+	key          []byte
+	val          []byte
+	entryOffsets []uint32
+	block        *block
+
+	tableID uint64
+	blockID int
+
+	prevOverlap uint16
+
+	it utils.Item
 }
 
 func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *table {
-	t := &table{manager: manager}
+	sstSize := int(manager.cfg.SSTableMaxSz)
+	if builder != nil {
+		sstSize = builder.done().size
+	}
+	var (
+		t   *table
+		err error
+	)
 	fid := utils.FID(sstName)
-	t.sst = file.OpenSSTable(&file.Option{
-		FID:      fid,
-		FileName: sstName,
-		Dir:      manager.cfg.WorkDir,
-		Flag:     os.O_CREATE | os.O_RDWR,
-		MaxSz:    int(manager.cfg.SSTableMaxSz),
-	})
+
+	if builder != nil {
+		if t, err = builder.flush(manager, sstName); err != nil {
+			log.Error("table-builder flush sst failed,err:", err)
+			return nil
+		}
+	} else {
+		t = &table{manager: manager, fid: fid}
+		t.sst = file.OpenSSTable(&file.Option{
+			FID:      fid,
+			FileName: sstName,
+			Dir:      manager.cfg.WorkDir,
+			Flag:     os.O_CREATE | os.O_RDWR,
+			MaxSz:    int(manager.cfg.SSTableMaxSz),
+		})
+	}
+	t.IncrRef()
 	if err := t.sst.Init(); err != nil {
+		log.Error("init sst file failed,err:", err)
 		return nil
 	}
 	return t
@@ -78,4 +140,13 @@ func decrRefs(tables []*table) error {
 		}
 	}
 	return nil
+}
+
+func (t *table) NewIterator(options *utils.Options) utils.Iterator {
+	t.IncrRef()
+	return &tableIterator{
+		opt: options,
+		t:   t,
+		bi:  &blockIterator{},
+	}
 }

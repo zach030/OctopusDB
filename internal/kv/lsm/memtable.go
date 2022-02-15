@@ -2,12 +2,12 @@ package lsm
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 
+	"github.com/pkg/errors"
 	"github.com/zach030/OctopusDB/internal/kv/file"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -80,13 +80,16 @@ func (m *MemTable) Get(key []byte) *utils.Entry {
 	return m.skipList.Search(key)
 }
 
+// refreshSkipList read and iterate wal file, fetch entry and add to skiplist
 func (m *MemTable) refreshSkipList() error {
 	if m.wal == nil || m.skipList == nil {
-		return errors.New("")
+		return errors.New("nil wal or skiplist")
 	}
-
-	// todo 遍历wal文件，写入skiplist
-	return nil
+	endOff, err := m.wal.Iterate(true, 0, m.replayFunction(m.lsm.cfg))
+	if err != nil {
+		return errors.WithMessage(err, fmt.Sprintf("while iterating wal: %s", m.wal.Name()))
+	}
+	return m.wal.Truncate(int64(endOff))
 }
 
 func (m *MemTable) Close() error {

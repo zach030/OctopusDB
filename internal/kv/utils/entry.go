@@ -50,8 +50,8 @@ type Entry struct {
 	ExpiresAt uint64
 
 	Version      uint64
-	Offset       uint32
-	Hlen         int // Length of the header.
+	Offset       uint32 // offset in file
+	Hlen         int    // Length of the header.
 	ValThreshold int64
 }
 

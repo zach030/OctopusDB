@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/prometheus/common/log"
+
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
@@ -45,6 +47,7 @@ func (l *LSM) Set(entry *utils.Entry) error {
 	if int64(l.memTable.wal.Size()) > l.cfg.MemTableSize {
 		l.imMemTable = append(l.imMemTable, l.memTable)
 		l.memTable = l.NewMemTable()
+		log.Info("memtable size is over limit, success new a memetable")
 	}
 	if err := l.memTable.Set(entry); err != nil {
 		return err
@@ -86,6 +89,7 @@ func (l *LSM) recover() (*MemTable, []*MemTable) {
 	if err != nil {
 		return nil, nil
 	}
+	log.Info("read files in current dir:", fs)
 	fid := make([]uint64, 0)
 	for _, f := range fs {
 		if !strings.HasSuffix(f.Name(), walFileExt) {
@@ -100,10 +104,12 @@ func (l *LSM) recover() (*MemTable, []*MemTable) {
 	sort.Slice(fid, func(i, j int) bool {
 		return fid[i] < fid[j]
 	})
+	log.Info("find wal files:", fid)
 	immt := make([]*MemTable, 0)
 	for _, i := range fid {
 		mt := l.openMemTable(i)
 		immt = append(immt, mt)
 	}
+	log.Info("success load wal files and rebuild memtables and immtables")
 	return l.NewMemTable(), immt
 }
