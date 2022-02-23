@@ -80,16 +80,17 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	// 分配一个fid
 	fid := immutable.wal.FID()
 	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
-	fmt.Println("new sst file:", sstName)
+	fmt.Println("flush immutable file to sst:", sstName)
 	// 构建table-builder
 	builder := newTableBuilder(l.cfg)
-	// 更新manifest
+	// 将所有entry加入到builder
 	iter := immutable.skipList.NewIterator()
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		entry := iter.Item()
 		builder.add(entry.Entry(), false)
 	}
 	tbl := openTable(l, sstName, builder)
+	// 更新manifest
 	if err := l.manifestFile.AddTableMeta(0, &file.TableMeta{
 		ID:       fid,
 		CheckSum: []byte{'m', 'o', 'c', 'k'},

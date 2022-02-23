@@ -1,15 +1,19 @@
 package lsm
 
-import "github.com/zach030/OctopusDB/internal/kv/utils"
+import (
+	"unsafe"
+
+	"github.com/zach030/OctopusDB/internal/kv/utils"
+)
 
 type tableBuilder struct {
 	sstSize       int64
-	curBlock      *block
+	curBlock      *block // 当前的block
 	cfg           *Config
-	blockList     []*block
+	blockList     []*block // 本sst文件内的block列表
 	keyCount      uint32
 	keyHashes     []uint32
-	maxVersion    uint64
+	maxVersion    uint64 // 当前最大版本号
 	baseKey       []byte
 	staleDataSize int
 	estimateSz    int64
@@ -21,21 +25,34 @@ type buildData struct {
 	checksum  []byte
 	size      int
 }
+
 type block struct {
-	offset            int //当前block的offset 首地址
-	checksum          []byte
+	offset            int    //当前block 在sst的offset 首地址
+	checksum          []byte // block data md5
 	entriesIndexStart int
-	chkLen            int
-	data              []byte
-	baseKey           []byte
+	chkLen            int    // length of checksum
+	data              []byte // all data in curr block
+	baseKey           []byte // 此block的第一个key
 	entryOffsets      []uint32
-	end               int
+	end               int // current offset
 	estimateSz        int64
 }
 
 type header struct {
 	overlap uint16 // Overlap with base key.
 	diff    uint16 // Length of the diff.
+}
+
+const headerSize = uint16(unsafe.Sizeof(header{}))
+
+func (h *header) decode(buf []byte) {
+	copy((*[headerSize]byte)(unsafe.Pointer(h))[:], buf[:headerSize])
+}
+
+func (h header) encode() []byte {
+	var b [4]byte
+	*(*header)(unsafe.Pointer(&b[0])) = h
+	return b[:]
 }
 
 func newTableBuilder(cfg *Config) *tableBuilder {
@@ -45,51 +62,74 @@ func newTableBuilder(cfg *Config) *tableBuilder {
 	}
 }
 
-func (t *tableBuilder) add(e *utils.Entry, isStale bool) {
+func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 	key := e.Key
 	val := utils.ValueStruct{Value: e.Value}
+	// todo 判断此block是否已写完
 	// try to allocate a block: modify curr block
-	t.keyHashes = append(t.keyHashes, utils.Hash(utils.ParseKey(key)))
-	if version := utils.ParseTimeStamp(key); version > t.maxVersion {
-		t.maxVersion = version
+	tb.keyHashes = append(tb.keyHashes, utils.Hash(utils.ParseKey(key)))
+	if version := utils.ParseTimeStamp(key); version > tb.maxVersion {
+		tb.maxVersion = version
 	}
 	var diffKey []byte
-	if len(t.curBlock.baseKey) == 0 {
-		t.curBlock.baseKey = append(t.curBlock.baseKey[:0], key...)
+	if len(tb.curBlock.baseKey) == 0 {
+		tb.curBlock.baseKey = append(tb.curBlock.baseKey[:0], key...)
 		diffKey = key
 	} else {
-		diffKey = t.keyDiff(key)
+		diffKey = tb.keyDiff(key)
 	}
 	h := header{
-		overlap: uint16(len(key) - len(diffKey)),
-		diff:    uint16(len(diffKey)),
+		overlap: uint16(len(key) - len(diffKey)), // overlap with common prefix
+		diff:    uint16(len(diffKey)),            // different suffix length
 	}
 
-	t.curBlock.entryOffsets = append(t.curBlock.entryOffsets, uint32(t.curBlock.end))
+	// every block entry offset
+	tb.curBlock.entryOffsets = append(tb.curBlock.entryOffsets, uint32(tb.curBlock.end))
 
-	t.append(h.encode())
-	t.append(diffKey)
+	tb.append(h.encode())
+	tb.append(diffKey)
 
-	dst := t.allocate(int(val.EncodedSize()))
+	dst := tb.allocate(int(val.EncodedSize()))
 	val.EncodeValue(dst)
 }
 
-func (t *tableBuilder) flush(lm *LevelManager, tableName string) (tbl *table, err error) {
+func (tb *tableBuilder) flush(lm *LevelManager, tableName string) (tbl *table, err error) {
 	return
 }
 
-func (t *tableBuilder) keyDiff(newKey []byte) []byte {
+func (tb *tableBuilder) keyDiff(newKey []byte) []byte {
 	var i int
-	for i = 0; i < len(newKey) && i < len(t.curBlock.baseKey); i++ {
-		if newKey[i] != t.curBlock.baseKey[i] {
+	for i = 0; i < len(newKey) && i < len(tb.curBlock.baseKey); i++ {
+		if newKey[i] != tb.curBlock.baseKey[i] {
 			break
 		}
 	}
+	// basekey: "test"
+	// newKey:  "test100"
+	// diff key is : "100"
 	return newKey[i:]
 }
 
-func (t *tableBuilder) append(data []byte) {
+func (tb *tableBuilder) allocate(need int) []byte {
+	// append data to curr block and modify offset
+	// check data slice length
+	b := tb.curBlock
+	if len(b.data[b.end:]) < need {
+		sz := 2 * len(b.data)
+		if b.end+need > sz {
+			sz = b.end + need
+		}
+		tmp := make([]byte, sz)
+		copy(tmp, b.data)
+		b.data = tmp
+	}
+	b.end += need
+	return b.data[b.end-need : b.end]
+}
 
+func (tb *tableBuilder) append(data []byte) {
+	dst := tb.allocate(len(data))
+	copy(dst, data)
 }
 
 func (tb *tableBuilder) done() buildData {
