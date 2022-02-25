@@ -71,6 +71,9 @@ type blockIterator struct {
 	it utils.Item
 }
 
+// openTable with builder argument
+// 1. builder is nil: sst file is already exist, openTable intend to load sst-file in disk and set sst options
+// 2. builder is not nil: immutable is ready to flush, so new sst file and iterate all entries for flushing
 func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *table {
 	sstSize := int(manager.cfg.SSTableMaxSz)
 	if builder != nil {
@@ -81,7 +84,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		err error
 	)
 	fid := utils.FID(sstName)
-
+	// builder exist, need to flush to disk
 	if builder != nil {
 		if t, err = builder.flush(manager, sstName); err != nil {
 			log.Error("table-builder flush sst failed,err:", err)
@@ -94,7 +97,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 			FileName: sstName,
 			Dir:      manager.cfg.WorkDir,
 			Flag:     os.O_CREATE | os.O_RDWR,
-			MaxSz:    int(manager.cfg.SSTableMaxSz),
+			MaxSz:    sstSize,
 		})
 	}
 	t.IncrRef()
@@ -102,6 +105,16 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		log.Error("init sst file failed,err:", err)
 		return nil
 	}
+	// 获取sst的最大key 需要使用迭代器
+	itr := t.NewIterator(&utils.Options{}) // 默认是降序
+	defer itr.Close()
+	// 定位到初始位置就是最大的key
+	itr.Rewind()
+	if !itr.Valid() {
+		panic(errors.Errorf("failed to read index, form maxKey"))
+	}
+	maxKey := itr.Item().Entry().Key
+	t.sst.SetMaxKey(maxKey)
 	return t
 }
 

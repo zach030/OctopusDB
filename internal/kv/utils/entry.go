@@ -7,6 +7,7 @@ import (
 
 // ValueStruct 将value与expiresAt作为一个整体
 type ValueStruct struct {
+	Meta      byte
 	Value     []byte
 	ExpiresAt uint64
 }
@@ -49,6 +50,7 @@ type Entry struct {
 	Value     []byte
 	ExpiresAt uint64
 
+	Meta         byte
 	Version      uint64
 	Offset       uint32 // offset in file
 	Hlen         int    // Length of the header.
@@ -92,4 +94,10 @@ func (e *Entry) LogHeaderLen() int {
 // LogOffset _
 func (e *Entry) LogOffset() uint32 {
 	return e.Offset
+}
+
+func (e *Entry) EncodedSize() uint32 {
+	sz := len(e.Value)
+	enc := sizeVarint(e.ExpiresAt)
+	return uint32(sz + enc)
 }

@@ -112,6 +112,9 @@ func (s *SSTable) MinKey() []byte {
 	return s.minKey
 }
 
+func (s *SSTable) SetMaxKey(maxKey []byte) {
+	s.maxKey = maxKey
+}
 func (s *SSTable) MaxKey() []byte {
 	return s.maxKey
 }
@@ -130,4 +133,8 @@ func (s *SSTable) Size() int64 {
 
 func (s *SSTable) Index() *pb.TableIndex {
 	return s.tableIdx
+}
+
+func (s *SSTable) Bytes(off, sz int) ([]byte, error) {
+	return s.mf.Bytes(off, sz)
 }

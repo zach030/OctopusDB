@@ -42,4 +42,12 @@ Separating Keys from Values. Distributed Database System. Support Graph Query.
 
 # 完整的一次写入流程
 1. 首先是DB层面的`OctopusDB.Set()`
-2. 
+
+
+# SST文件的结构
+![sst-component](doc/sst/sst-component.drawio.png)
+每个sst文件由多个block组成，便于分片加载内存。因此sst文件由block和index部分组成
+
+每个block内记录entry列表，因此每个block内也会记录entry的offset
+
+index部分用于记录每个block的offset，baseKey，是否开启布隆过滤器
