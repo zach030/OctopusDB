@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"io"
 	"os"
 	"sync/atomic"
 
@@ -29,28 +30,36 @@ type tableIterator struct {
 	err      error
 }
 
-func (t tableIterator) Next() {
+func (t *tableIterator) Next() {
+	t.err = nil
+	tblOffsets := t.t.sst.Indexes().GetOffsets()
+	if t.blockPos >= len(tblOffsets) {
+		t.err = io.EOF
+		return
+	}
+	if len(t.bi.data) == 0 {
+		t.t
+	}
+}
+
+func (t *tableIterator) Rewind() {
 	panic("implement me")
 }
 
-func (t tableIterator) Rewind() {
+func (t *tableIterator) Valid() bool {
+	return t.err != io.EOF
+}
+
+func (t *tableIterator) Close() error {
 	panic("implement me")
 }
 
-func (t tableIterator) Valid() bool {
+func (t *tableIterator) Seek(bytes []byte) {
 	panic("implement me")
 }
 
-func (t tableIterator) Close() error {
-	panic("implement me")
-}
-
-func (t tableIterator) Seek(bytes []byte) {
-	panic("implement me")
-}
-
-func (t tableIterator) Item() utils.Item {
-	panic("implement me")
+func (t *tableIterator) Item() utils.Item {
+	return t.it
 }
 
 type blockIterator struct {
@@ -69,6 +78,35 @@ type blockIterator struct {
 	prevOverlap uint16
 
 	it utils.Item
+}
+
+func (b *blockIterator) Next() {
+	panic("implement me")
+}
+
+func (b *blockIterator) setBlock(block *block) {
+	b.err = nil
+	b.data = block.data[:block.entriesIndexStart]
+}
+
+func (b *blockIterator) Rewind() {
+	panic("implement me")
+}
+
+func (b *blockIterator) Valid() bool {
+	return b.err != io.EOF
+}
+
+func (b *blockIterator) Close() error {
+	panic("implement me")
+}
+
+func (b *blockIterator) Seek(bytes []byte) {
+	panic("implement me")
+}
+
+func (b *blockIterator) Item() utils.Item {
+	panic("implement me")
 }
 
 // openTable with builder argument
@@ -128,6 +166,20 @@ func (t *table) Search(key []byte, maxVersion *uint64) (*utils.Entry, error) {
 		return nil, errors.New("key not found")
 	}
 	return nil, nil
+}
+
+// block 根据索引在sst中构建block
+func (t *table) block(idx int) (*block, error) {
+	if idx < 0 {
+		panic(errors.Errorf("id=%d", idx))
+	}
+	if idx >= len(t.sst.Indexes().GetOffsets()) {
+		return nil, errors.Errorf("block:%d out of index", idx)
+	}
+	// var b *block
+	// 1. 拼接查询的key
+	// 2 查询缓存 fid+offset--》block
+	//
 }
 
 func (t *table) IncrRef() {
