@@ -71,7 +71,7 @@ func newSegLRU(data map[uint64]*list.Element, oneCap, twoCap int) *segmentLRU {
 }
 
 func (s *segmentLRU) add(item storeItem) {
-	item.stage = 1
+	item.stage = STAGE_ONE
 	// 如果空间足够，则放入map中
 	if s.segOne.Len() < s.segOneCap || s.Len() < s.segOneCap+s.segTwoCap {
 		s.data[item.key] = s.segOne.PushFront(&item)
@@ -80,7 +80,7 @@ func (s *segmentLRU) add(item storeItem) {
 	old := s.segOne.Back()
 	oldItem := old.Value.(*storeItem)
 	delete(s.data, oldItem.key)
-	oldItem = &item
+	*oldItem = item
 	s.data[item.key] = old
 	s.segOne.MoveToFront(old)
 }
@@ -98,7 +98,7 @@ func (s *segmentLRU) get(v *list.Element) {
 		// remove from stage one
 		s.segOne.Remove(v)
 		item.stage = STAGE_TWO
-		s.data[item.key] = s.segTwo.PushFront(v)
+		s.data[item.key] = s.segTwo.PushFront(item)
 		return
 	}
 	// 2.2 stage two list is full

@@ -51,34 +51,43 @@ func Test_segmentLRU_add(t *testing.T) {
 		assert.Equal(t, STAGE_ONE, i4.stage)
 		slru.add(i5)
 		assert.Equal(t, STAGE_ONE, i5.stage)
-		// list-1: 5-->4-->3-->2-->1
+		// list-1: 5-->4-->3-->2
 		// list-2: nil
 		printList("1", slru.segOne)
 	})
 
 	back := slru.segOne.Back()
+	assert.Equal(t, uint64(2), back.Value.(*storeItem).key)
 	slru.get(back)
-	assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
-	// list-1: 5-->4-->3-->2
-	// list-2: 1
-	printList("1", slru.segOne)
-	printList("2", slru.segTwo)
-
-	back = slru.segOne.Back()
-	slru.get(back)
-	assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
 	// list-1: 5-->4-->3
-	// list-2: 2-->1
+	// list-2: 2
+	printList("1", slru.segOne)
+	printList("2", slru.segTwo)
+	assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
+
+	back = slru.segOne.Back()
+	assert.Equal(t, uint64(3), back.Value.(*storeItem).key)
+	slru.get(back)
+	// list-1: 5-->4
+	// list-2: 3-->2
 	printList("1", slru.segOne)
 	printList("2", slru.segTwo)
 
 	back = slru.segOne.Back()
-	slru.get(back)
-	assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
-	// list-1: 1-->5-->4
-	// list-2: 3-->2-->1
-	printList("1", slru.segOne)
-	printList("2", slru.segTwo)
+	//slru.get(back)
+	//assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
+	//// list-1: 5-->4-->3
+	//// list-2: 2-->1
+	//printList("1", slru.segOne)
+	//printList("2", slru.segTwo)
+	//
+	//back = slru.segOne.Back()
+	//slru.get(back)
+	//assert.Equal(t, STAGE_TWO, back.Value.(*storeItem).stage)
+	//// list-1: 1-->5-->4
+	//// list-2: 3-->2-->1
+	//printList("1", slru.segOne)
+	//printList("2", slru.segTwo)
 }
 
 func printList(name string, l *list.List) {
