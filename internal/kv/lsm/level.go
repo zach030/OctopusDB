@@ -15,6 +15,7 @@ type LevelManager struct {
 	manifestFile *file.ManifestFile
 	cfg          *Config
 	levels       []*levelHandler
+	cache        *cache
 	maxFID       uint64
 }
 
@@ -58,6 +59,7 @@ func (l *LevelManager) build() error {
 	if err := l.manifestFile.FilterValidTables(utils.LoadIDMap(l.cfg.WorkDir)); err != nil {
 		return err
 	}
+	l.cache = NewCache(l.cfg)
 	var maxFd uint64
 	for tid, tableManifest := range manifest.Tables {
 		if tid > maxFd {
