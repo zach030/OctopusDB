@@ -19,10 +19,10 @@ type tableBuilder struct {
 	curBlock      *block // 当前的block
 	cfg           *Config
 	blockList     []*block // 本sst文件内的block列表
-	keyCount      uint32
-	keyHashes     []uint32
-	maxVersion    uint64 // 当前最大版本号
-	baseKey       []byte
+	keyCount      uint32   // key数量
+	keyHashes     []uint32 // keyHash的数组
+	maxVersion    uint64   // 当前最大版本号
+	baseKey       []byte   // 初始key
 	staleDataSize int
 	estimateSz    int64
 }
@@ -45,6 +45,27 @@ type block struct {
 	entryOffsets      []uint32 // record each entry offset
 	end               int      // current offset
 	estimateSz        int64    // estimate current entry size to try to allocate new block
+}
+
+// Decode
+// block structure:
+// | entry1-offset | entry2-offset | ...... | length of entryOffsets | checksum | length of checksum |
+func (b *block) Decode() error {
+	pos := len(b.data) - 4
+	b.chkLen = int(utils.BytesToU32(b.data[pos : pos+4]))
+	pos -= b.chkLen
+	b.checksum = b.data[pos : pos+b.chkLen]
+	pos -= 4
+	NumOfEntries := int(utils.BytesToU32(b.data[pos : pos+4]))
+	b.entriesIndexStart = pos - (NumOfEntries * 4)
+	entriesEndOffset := b.entriesIndexStart + NumOfEntries*4
+	b.entryOffsets = utils.BytesToU32Slice(b.data[b.entriesIndexStart:entriesEndOffset])
+	// todo 为什么pos+4，numsOfEntries也算data吗
+	b.data = b.data[:pos+4]
+	if err := utils.VerifyChecksum(b.data, b.checksum); err != nil {
+		return err
+	}
+	return nil
 }
 
 type header struct {
@@ -170,7 +191,9 @@ func (tb *tableBuilder) allocate(need int) []byte {
 
 // append serialized data to current block
 func (tb *tableBuilder) append(data []byte) {
+	// allocate length of data in curr block
 	dst := tb.allocate(len(data))
+	// copy data to dst space
 	copy(dst, data)
 }
 
@@ -216,7 +239,7 @@ func (tb *tableBuilder) finishBlock() {
 	// Already write all entry kv data, write offsets and checksum now
 	// Append the entryOffsets and its length.
 	// | entry1-offset | entry2-offset | ...... | length of entryOffsets | checksum | length of checksum |
-
+	// block encode
 	tb.append(utils.U32SliceToBytes(tb.curBlock.entryOffsets))
 	tb.append(utils.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
 	checksum := tb.calculateChecksum(tb.curBlock.data[:tb.curBlock.end])

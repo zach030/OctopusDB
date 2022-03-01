@@ -1,9 +1,11 @@
 package lsm
 
 import (
-	"io"
+	"encoding/binary"
 	"os"
 	"sync/atomic"
+
+	"github.com/zach030/OctopusDB/internal/kv/pb"
 
 	"github.com/prometheus/common/log"
 
@@ -19,94 +21,6 @@ type table struct {
 	sst     *file.SSTable
 	fid     uint64
 	ref     int32
-}
-
-type tableIterator struct {
-	it       utils.Item
-	opt      *utils.Options
-	t        *table
-	blockPos int
-	bi       *blockIterator
-	err      error
-}
-
-func (t *tableIterator) Next() {
-	t.err = nil
-	tblOffsets := t.t.sst.Indexes().GetOffsets()
-	if t.blockPos >= len(tblOffsets) {
-		t.err = io.EOF
-		return
-	}
-	if len(t.bi.data) == 0 {
-		t.t
-	}
-}
-
-func (t *tableIterator) Rewind() {
-	panic("implement me")
-}
-
-func (t *tableIterator) Valid() bool {
-	return t.err != io.EOF
-}
-
-func (t *tableIterator) Close() error {
-	panic("implement me")
-}
-
-func (t *tableIterator) Seek(bytes []byte) {
-	panic("implement me")
-}
-
-func (t *tableIterator) Item() utils.Item {
-	return t.it
-}
-
-type blockIterator struct {
-	data         []byte
-	idx          int
-	err          error
-	baseKey      []byte
-	key          []byte
-	val          []byte
-	entryOffsets []uint32
-	block        *block
-
-	tableID uint64
-	blockID int
-
-	prevOverlap uint16
-
-	it utils.Item
-}
-
-func (b *blockIterator) Next() {
-	panic("implement me")
-}
-
-func (b *blockIterator) setBlock(block *block) {
-	b.err = nil
-	b.data = block.data[:block.entriesIndexStart]
-}
-
-func (b *blockIterator) Rewind() {
-	panic("implement me")
-}
-
-func (b *blockIterator) Valid() bool {
-	return b.err != io.EOF
-}
-
-func (b *blockIterator) Close() error {
-	panic("implement me")
-}
-
-func (b *blockIterator) Seek(bytes []byte) {
-	panic("implement me")
-}
-
-func (b *blockIterator) Item() utils.Item {
-	panic("implement me")
 }
 
 // openTable with builder argument
@@ -156,7 +70,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 	return t
 }
 
-// Search 在table内查找
+// Search 在table内查找key所对应的entry
 func (t *table) Search(key []byte, maxVersion *uint64) (*utils.Entry, error) {
 	t.IncrRef()
 	defer t.DecrRef()
@@ -165,7 +79,20 @@ func (t *table) Search(key []byte, maxVersion *uint64) (*utils.Entry, error) {
 	if t.sst.HasBloomFilter(); !bloomFilter.MayContain(key) {
 		return nil, errors.New("key not found")
 	}
-	return nil, nil
+	iter := t.NewIterator(&utils.Options{})
+	// todo table 中定位到key所在的位置
+	iter.Seek(key)
+	if !iter.Valid() {
+		return nil, utils.ErrKeyNotExist
+	}
+	found := iter.Item().Entry()
+	if utils.IsSameKey(key, found.Key) {
+		if version := utils.ParseTimeStamp(found.Key); *maxVersion < version {
+			*maxVersion = version
+			return found, nil
+		}
+	}
+	return nil, utils.ErrKeyNotExist
 }
 
 // block 根据索引在sst中构建block
@@ -173,13 +100,37 @@ func (t *table) block(idx int) (*block, error) {
 	if idx < 0 {
 		panic(errors.Errorf("id=%d", idx))
 	}
-	if idx >= len(t.sst.Indexes().GetOffsets()) {
+	if idx >= len(t.sst.Index().GetOffsets()) {
 		return nil, errors.Errorf("block:%d out of index", idx)
 	}
-	// var b *block
-	// 1. 拼接查询的key
-	// 2 查询缓存 fid+offset--》block
-	//
+	var (
+		b   *block
+		err error
+	)
+	// query cache
+	key := t.FormatCacheKey(idx)
+	// cache hit
+	blk, ok := t.manager.cache.blocks.Get(key)
+	if ok {
+		if bl, ok1 := blk.(*block); ok1 {
+			return bl, nil
+		}
+	}
+	// cache miss
+	blockOffset, ok := t.getBlockOffset(idx)
+	if !ok {
+		panic("block offset panic")
+	}
+	b.offset = int(blockOffset.GetOffset())
+	if b.data, err = t.read(b.offset, int(blockOffset.Len)); err != nil {
+		return nil, errors.Wrapf(err, "read sst:%d, offset:%d, size:%d failed", t.fid, b.offset, blockOffset.Len)
+	}
+	// decode block from data buf
+	if err = b.Decode(); err != nil {
+		return nil, err
+	}
+	t.manager.cache.blocks.Set(key, b)
+	return b, nil
 }
 
 func (t *table) IncrRef() {
@@ -207,11 +158,24 @@ func decrRefs(tables []*table) error {
 	return nil
 }
 
-func (t *table) NewIterator(options *utils.Options) utils.Iterator {
-	t.IncrRef()
-	return &tableIterator{
-		opt: options,
-		t:   t,
-		bi:  &blockIterator{},
+func (t *table) read(off, sz int) ([]byte, error) {
+	return t.sst.Bytes(off, sz)
+}
+
+// getBlockOffset get blockOffset
+func (t *table) getBlockOffset(idx int) (*pb.BlockOffset, bool) {
+	tblIdx := t.sst.Index()
+	if idx < 0 || idx >= len(tblIdx.Offsets) {
+		return nil, false
 	}
+	off := tblIdx.GetOffsets()[idx]
+	return off, true
+}
+
+// FormatCacheKey generate key in cache: fid+index
+func (t *table) FormatCacheKey(idx int) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint32(buf[:4], uint32(t.fid))
+	binary.BigEndian.PutUint32(buf[4:], uint32(idx))
+	return buf
 }

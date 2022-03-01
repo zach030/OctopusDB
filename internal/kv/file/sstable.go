@@ -119,10 +119,6 @@ func (s *SSTable) MaxKey() []byte {
 	return s.maxKey
 }
 
-func (s *SSTable) Indexes() *pb.TableIndex {
-	return s.tableIdx
-}
-
 func (s *SSTable) HasBloomFilter() bool {
 	return s.hasBloomFilter
 }

@@ -32,7 +32,6 @@ func (h *levelHandler) Get(key []byte) (*utils.Entry, error) {
 }
 
 func (h *levelHandler) SearchL0(key []byte) (*utils.Entry, error) {
-	// todo 调用table中的查询
 	var version uint64
 	for _, t := range h.tables {
 		if entry, err := t.Search(key, &version); err == nil {

@@ -12,11 +12,11 @@ import (
 
 type LevelManager struct {
 	lsm          *LSM
-	manifestFile *file.ManifestFile
+	manifestFile *file.ManifestFile // 记录level信息
 	cfg          *Config
-	levels       []*levelHandler
-	cache        *cache
-	maxFID       uint64
+	levels       []*levelHandler // 对每个level操作的handler
+	cache        *cache          // 缓存
+	maxFID       uint64          // 当前最大fileID
 }
 
 func (l *LSM) initLevelManager(cfg *Config) *LevelManager {
@@ -79,7 +79,7 @@ func (l *LevelManager) build() error {
 
 // flush if memtable size over limit, flush it to disk L0 as sst file
 func (l *LevelManager) flush(immutable *MemTable) error {
-	// 分配一个fid
+	// 获取fid，构造sst文件名
 	fid := immutable.wal.FID()
 	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
 	fmt.Println("flush immutable file to sst:", sstName)
