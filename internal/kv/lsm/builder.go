@@ -113,6 +113,7 @@ func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 		tb.maxVersion = version
 	}
 	var diffKey []byte
+	// 如果没有设置basekey的话，将当前的key设置为baseKey
 	if len(tb.curBlock.baseKey) == 0 {
 		tb.curBlock.baseKey = append(tb.curBlock.baseKey[:0], key...)
 		diffKey = key
@@ -120,6 +121,7 @@ func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 		diffKey = tb.keyDiff(key)
 	}
 	h := header{
+		// 与baseKey重叠的长度 + 不同的key长度
 		overlap: uint16(len(key) - len(diffKey)), // overlap with common prefix
 		diff:    uint16(len(diffKey)),            // different suffix length
 	}

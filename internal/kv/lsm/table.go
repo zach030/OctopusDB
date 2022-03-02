@@ -80,7 +80,6 @@ func (t *table) Search(key []byte, maxVersion *uint64) (*utils.Entry, error) {
 		return nil, errors.New("key not found")
 	}
 	iter := t.NewIterator(&utils.Options{})
-	// todo table 中定位到key所在的位置
 	iter.Seek(key)
 	if !iter.Valid() {
 		return nil, utils.ErrKeyNotExist

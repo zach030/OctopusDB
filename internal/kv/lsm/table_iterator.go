@@ -134,10 +134,70 @@ func (b *blockIterator) Close() error {
 	return nil
 }
 
-func (b *blockIterator) Seek(bytes []byte) {
-
+func (b *blockIterator) Seek(key []byte) {
+	entryNum := len(b.entryOffsets)
+	start := 0
+	entryIdx := sort.Search(entryNum, func(i int) bool {
+		if i < start {
+			return false
+		}
+		b.setIdx(i)
+		return utils.CompareKeys(b.key, key) >= 0
+	})
+	b.setIdx(entryIdx)
 }
 
 func (b *blockIterator) Item() utils.Item {
 	return b.it
+}
+
+// setIdx 设置当前索引下标为idx:第多少个entry
+func (b *blockIterator) setIdx(idx int) {
+	b.idx = idx
+	// 下标越界
+	if idx < 0 || idx >= len(b.entryOffsets) {
+		b.err = io.EOF
+		return
+	}
+	// Set base key.
+	if len(b.baseKey) == 0 {
+		var baseHeader header
+		baseHeader.decode(b.data)
+		b.baseKey = b.data[headerSize : headerSize+baseHeader.diff]
+	}
+
+	b.err = nil
+	var (
+		entryStartOffset int
+		entryEndOffset   int
+	)
+	entryStartOffset = int(b.entryOffsets[idx])
+	// set entry end offset
+	if idx+1 == len(b.entryOffsets) {
+		entryEndOffset = len(b.data)
+	} else {
+		entryEndOffset = int(b.entryOffsets[idx+1])
+	}
+	// | header(4 byte) | diff key | value-struct |
+	entryData := b.data[entryStartOffset:entryEndOffset]
+	var h header
+	h.decode(entryData)
+	// example: baseKey:"key", prevOverlap:0
+	// header: overlap:3, diff:1
+	// key = baseKey[prevOverlap:overlap]+diff
+	if h.overlap > b.prevOverlap {
+		// todo figure the logic of prev overlap key
+	}
+	valueOffset := headerSize + h.diff
+	diffKey := b.data[headerSize:valueOffset]
+	b.key = append(b.key[:h.overlap], diffKey...)
+
+	entry := utils.NewEntry(b.key, nil)
+	val := &utils.ValueStruct{}
+	val.DecodeValue(entryData[valueOffset:])
+	b.val = val.Value
+	entry.Value = val.Value
+	entry.ExpiresAt = val.ExpiresAt
+	entry.Meta = val.Meta
+	b.it = &Item{e: entry}
 }
