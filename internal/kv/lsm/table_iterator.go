@@ -37,12 +37,77 @@ func (it *tableIterator) Next() {
 		return
 	}
 	if len(it.bi.data) == 0 {
-
+		// 如果第一次调用，需要默认置到block0
+		b, err := it.t.block(it.blockPos)
+		if err != nil {
+			it.err = err
+			return
+		}
+		it.bi.initWithBlock(it, b)
+		it.bi.seekFirst()
+		it.err = it.bi.err
+		return
 	}
+	it.bi.Next()
+	if !it.bi.Valid() {
+		it.blockPos++
+		it.bi.data = nil
+		it.Next()
+		return
+	}
+	it.item = it.bi.Item()
 }
 
 func (it *tableIterator) Rewind() {
-	panic("implement me")
+	if it.opt.IsAsc {
+		it.seekFirst()
+	} else {
+		it.seekLast()
+	}
+}
+
+func (b *blockIterator) initWithBlock(it *tableIterator, bl *block) {
+	b.tableID = it.t.fid
+	b.blockID = it.blockPos
+	b.setBlock(bl)
+}
+
+func (it *tableIterator) seekFirst() {
+	nums := len(it.t.sst.Index().GetOffsets())
+	if nums == 0 {
+		// 如果当前sst文件内block数目为0
+		it.err = io.EOF
+		return
+	}
+	it.blockPos = 0
+	b, err := it.t.block(it.blockPos)
+	if err != nil {
+		it.err = err
+		return
+	}
+	it.bi.initWithBlock(it, b)
+	it.bi.seekFirst()
+	it.item = it.bi.Item()
+	it.err = it.bi.err
+}
+
+func (it *tableIterator) seekLast() {
+	nums := len(it.t.sst.Index().GetOffsets())
+	if nums == 0 {
+		// 如果当前sst文件内block数目为0
+		it.err = io.EOF
+		return
+	}
+	it.blockPos = nums - 1
+	b, err := it.t.block(it.blockPos)
+	if err != nil {
+		it.err = err
+		return
+	}
+	it.bi.initWithBlock(it, b)
+	it.bi.seekLast()
+	it.item = it.bi.Item()
+	it.err = it.bi.err
 }
 
 func (it *tableIterator) Valid() bool {
@@ -50,7 +115,8 @@ func (it *tableIterator) Valid() bool {
 }
 
 func (it *tableIterator) Close() error {
-	return nil
+	it.bi.Close()
+	return it.t.DecrRef()
 }
 
 func (it *tableIterator) Seek(key []byte) {
@@ -72,6 +138,13 @@ func (it *tableIterator) Seek(key []byte) {
 		it.seek(0, key)
 	}
 	it.seek(idx-1, key)
+	if it.err == io.EOF {
+		if idx == len(it.t.sst.Index().Offsets) {
+			return
+		}
+		// 向后一个查
+		it.seek(idx, key)
+	}
 }
 
 func (it *tableIterator) seek(blockIndex int, key []byte) {
@@ -81,9 +154,7 @@ func (it *tableIterator) seek(blockIndex int, key []byte) {
 		it.err = err
 		return
 	}
-	it.bi.blockID = it.blockPos
-	it.bi.tableID = it.t.fid
-	it.bi.setBlock(block)
+	it.bi.initWithBlock(it, block)
 	it.bi.Seek(key)
 
 	it.err = it.bi.err
@@ -113,7 +184,7 @@ type blockIterator struct {
 }
 
 func (b *blockIterator) Next() {
-	panic("implement me")
+	b.setIdx(b.idx + 1)
 }
 
 func (b *blockIterator) setBlock(block *block) {
@@ -122,8 +193,16 @@ func (b *blockIterator) setBlock(block *block) {
 	b.idx = 0
 }
 
+func (b *blockIterator) seekFirst() {
+	b.setIdx(0)
+}
+
+func (b *blockIterator) seekLast() {
+	b.setIdx(len(b.entryOffsets) - 1)
+}
+
 func (b *blockIterator) Rewind() {
-	panic("implement me")
+	b.setIdx(0)
 }
 
 func (b *blockIterator) Valid() bool {
@@ -182,12 +261,16 @@ func (b *blockIterator) setIdx(idx int) {
 	entryData := b.data[entryStartOffset:entryEndOffset]
 	var h header
 	h.decode(entryData)
-	// example: baseKey:"key", prevOverlap:0
-	// header: overlap:3, diff:1
-	// key = baseKey[prevOverlap:overlap]+diff
+	// example: baseKey:"key"
+	//          prevKey:"k1",prevOverlap:1
+	//          currKey:"key1"
+	// 			header:  overlap:3, diff:1
+	// key = "k" + "ey" + "1"
 	if h.overlap > b.prevOverlap {
-		// todo figure the logic of prev overlap key
+		// todo figure out the logic of prev overlap key
+		b.key = append(b.key[:b.prevOverlap], b.baseKey[b.prevOverlap:h.overlap]...)
 	}
+	b.prevOverlap = h.overlap
 	valueOffset := headerSize + h.diff
 	diffKey := b.data[headerSize:valueOffset]
 	b.key = append(b.key[:h.overlap], diffKey...)
