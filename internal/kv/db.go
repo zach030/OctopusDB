@@ -26,11 +26,18 @@ func Open(opt *Options) *OctopusDB {
 	db := &OctopusDB{opt: opt}
 	// todo 目录锁
 	db.lsm = lsm.NewLSM(&lsm.Config{
-		WorkDir:            opt.WorkDir,
-		MemTableSize:       opt.MemTableSize,
-		SSTableMaxSz:       opt.SSTableMaxSz,
-		BlockSize:          4 * 1024,
-		BloomFalsePositive: 0.01,
+		WorkDir:             opt.WorkDir,
+		MemTableSize:        opt.MemTableSize,
+		SSTableMaxSz:        opt.SSTableMaxSz,
+		BlockSize:           4 * 1024,
+		BloomFalsePositive:  0.01,
+		BaseLevelSize:       10 << 20,
+		LevelSizeMultiplier: 10,
+		BaseTableSize:       2 << 20,
+		TableSizeMultiplier: 2,
+		NumLevelZeroTables:  15,
+		MaxLevelNum:         utils.MaxLevelNum,
+		NumCompactors:       3,
 	})
 	db.stat = newStat()
 	db.vlog = vlog.NewVLog(&vlog.VLogOption{})

@@ -10,13 +10,9 @@ type cache struct {
 const defaultCacheSize = 1024
 
 func NewCache(cfg *Config) *cache {
-	var size = cfg.CacheSize
-	if size == 0 {
-		size = defaultCacheSize
-	}
 	return &cache{
-		indexs: coreCache.NewCache(size),
-		blocks: coreCache.NewCache(size),
+		indexs: coreCache.NewCache(defaultCacheSize),
+		blocks: coreCache.NewCache(defaultCacheSize),
 	}
 }
 

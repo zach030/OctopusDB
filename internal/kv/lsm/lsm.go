@@ -27,8 +27,14 @@ type Config struct {
 	BlockSize int
 	// BloomFalsePositive is the false positive probabiltiy of bloom filter.
 	BloomFalsePositive float64
-	CacheSize          int
-	MaxLevelNums       int
+	// compact
+	NumCompactors       int
+	BaseLevelSize       int64
+	LevelSizeMultiplier int // 决定level之间期望的size比例
+	TableSizeMultiplier int
+	BaseTableSize       int64
+	NumLevelZeroTables  int
+	MaxLevelNum         int
 }
 
 func NewLSM(cfg *Config) *LSM {

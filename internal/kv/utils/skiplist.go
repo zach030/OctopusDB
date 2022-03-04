@@ -165,7 +165,7 @@ type SkipListIterator struct {
 	sl  *SkipList // 跳表
 }
 
-func (s *SkipList) NewIterator() *SkipListIterator {
+func (s *SkipList) NewIterator() Iterator {
 	return &SkipListIterator{
 		sl: s,
 	}

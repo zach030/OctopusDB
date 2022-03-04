@@ -6,6 +6,8 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+
+	"github.com/prometheus/common/log"
 )
 
 const maxHeaderSize int = 21
@@ -72,7 +74,9 @@ func WalCodec(buf *bytes.Buffer, e *Entry) int {
 	}
 	// write crc32 hash.
 	var crcBuf [crc32.Size]byte
-	binary.BigEndian.PutUint32(crcBuf[:], hash.Sum32())
+	var sum = hash.Sum32()
+	log.Info("write wal crc code is:", sum)
+	binary.BigEndian.PutUint32(crcBuf[:], sum)
 	// write crc
 	if _, err := buf.Write(crcBuf[:]); err != nil {
 		panic(err)

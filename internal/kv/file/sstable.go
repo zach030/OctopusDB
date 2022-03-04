@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/prometheus/common/log"
+
 	"github.com/pkg/errors"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 
@@ -29,6 +31,7 @@ type SSTable struct {
 func OpenSSTable(option *Option) *SSTable {
 	mf, err := OpenMmapFile(option.FileName, os.O_CREATE|os.O_RDWR, option.MaxSz)
 	if err != nil {
+		log.Error("open sst failed:", err)
 		return nil
 	}
 	return &SSTable{mf: mf, fid: option.FID}

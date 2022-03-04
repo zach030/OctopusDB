@@ -1,7 +1,6 @@
 package lsm
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -46,8 +45,8 @@ func (l *LevelManager) loadManifest() error {
 }
 
 func (l *LevelManager) build() error {
-	l.levels = make([]*levelHandler, 0, l.cfg.MaxLevelNums)
-	for i := 0; i < len(l.levels); i++ {
+	l.levels = make([]*levelHandler, 0, l.cfg.MaxLevelNum)
+	for i := 0; i < l.cfg.MaxLevelNum; i++ {
 		l.levels = append(l.levels, &levelHandler{
 			level:   0,
 			tables:  make([]*table, 0),
@@ -69,7 +68,7 @@ func (l *LevelManager) build() error {
 		t := openTable(l, filename, nil)
 		l.levels[tableManifest.Level].tables = append(l.levels[tableManifest.Level].tables, t)
 	}
-	for i := 0; i < l.cfg.MaxLevelNums; i++ {
+	for i := 0; i < l.cfg.MaxLevelNum; i++ {
 		l.levels[i].Sort()
 	}
 	atomic.AddUint64(&l.maxFID, maxFd)
@@ -82,14 +81,15 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	// 获取fid，构造sst文件名
 	fid := immutable.wal.FID()
 	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
-	fmt.Println("flush immutable file to sst:", sstName)
+	log.Info("flush immutable file to sst:", sstName)
 	// 构建table-builder
 	builder := newTableBuilder(l.cfg)
 	// 将所有entry加入到builder
 	iter := immutable.skipList.NewIterator()
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		entry := iter.Item()
-		builder.add(entry.Entry(), false)
+		// todo bug here not add entry
+		entry := iter.Item().Entry()
+		builder.add(entry, false)
 	}
 	tbl := openTable(l, sstName, builder)
 	// 更新manifest
@@ -115,7 +115,7 @@ func (l *LevelManager) Get(key []byte) (*utils.Entry, error) {
 		return entry, err
 	}
 	// l1-l7 层查询
-	for i := 0; i < l.cfg.MaxLevelNums; i++ {
+	for i := 0; i < l.cfg.MaxLevelNum; i++ {
 		level := l.levels[i]
 		if entry, err = level.Get(key); entry != nil {
 			return entry, err

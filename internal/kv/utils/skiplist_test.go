@@ -67,3 +67,16 @@ func BenchmarkSkipList_AddSearch(b *testing.B) {
 		require.Equal(b, value, e.Value)
 	}
 }
+
+func TestSkipListIterator(t *testing.T) {
+	sl := NewSkipList(1000)
+	e1 := &Entry{Key: []byte("k1"), Value: []byte("v1")}
+	e2 := &Entry{Key: []byte("k2"), Value: []byte("v2")}
+	fmt.Println(sl.Add(e1))
+	fmt.Println(sl.Add(e2))
+	iter := sl.NewIterator()
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		it := iter.Item()
+		fmt.Println("key:", string(it.Entry().Key), ", value:", string(it.Entry().Value))
+	}
+}
