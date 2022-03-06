@@ -9,6 +9,8 @@ import (
 	"os"
 	"sync"
 
+	"github.com/prometheus/common/log"
+
 	"github.com/pkg/errors"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
@@ -138,20 +140,17 @@ func (r *SafeRead) MakeEntry(reader io.Reader) (*utils.Entry, error) {
 	}
 	e.Key, e.Value = kvBuf[:kl], kvBuf[kl:]
 	crcBuf := make([]byte, crc32.Size)
-	if _, err := io.ReadFull(hashReader, crcBuf); err != nil {
+	if _, err := io.ReadFull(reader, crcBuf); err != nil {
 		if err == io.EOF {
 			err = utils.ErrTruncate
 		}
 		return nil, err
 	}
-	//crc := utils.BytesToU32(crcBuf[:])
-	//// todo invalid checksum
-	//// crc:2596072870
-	//log.Info("read crc is:", crc, ", should be:", hashReader.Sum32())
-	//if crc != hashReader.Sum32() {
-	//	log.Error(err)
-	//	return nil, utils.ErrTruncate
-	//}
+	crc := utils.BytesToU32(crcBuf[:])
+	if crc != hashReader.Sum32() {
+		log.Error(err)
+		return nil, utils.ErrTruncate
+	}
 	e.ExpiresAt = h.ExpiresAt
 	return e, nil
 }

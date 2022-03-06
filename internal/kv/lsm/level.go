@@ -40,7 +40,6 @@ func (l *LevelManager) loadManifest() error {
 		return err
 	}
 	l.manifestFile = mf
-	log.Info("success load manifest-file")
 	return nil
 }
 
@@ -72,7 +71,6 @@ func (l *LevelManager) build() error {
 		l.levels[i].Sort()
 	}
 	atomic.AddUint64(&l.maxFID, maxFd)
-	log.Info("success build level-manager")
 	return nil
 }
 
@@ -81,7 +79,7 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	// 获取fid，构造sst文件名
 	fid := immutable.wal.FID()
 	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
-	log.Info("flush immutable file to sst:", sstName)
+	log.Info("[Flush] immutable file to sst:", sstName)
 	// 构建table-builder
 	builder := newTableBuilder(l.cfg)
 	// 将所有entry加入到builder
@@ -122,4 +120,16 @@ func (l *LevelManager) Get(key []byte) (*utils.Entry, error) {
 		}
 	}
 	return nil, errors.New("key not found")
+}
+
+func (l *LevelManager) lastLevelSize() int64 {
+	return l.lastLevel().levelSize()
+}
+
+func (l *LevelManager) lastLevel() *levelHandler {
+	return l.levels[len(l.levels)-1]
+}
+
+func (h *levelHandler) levelSize() int64 {
+	return h.totalSize
 }

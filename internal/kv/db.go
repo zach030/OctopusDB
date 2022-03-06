@@ -41,7 +41,7 @@ func Open(opt *Options) *OctopusDB {
 	})
 	db.stat = newStat()
 	db.vlog = vlog.NewVLog(&vlog.VLogOption{})
-	go db.lsm.StartCompaction()
+	db.lsm.StartCompaction()
 	go db.vlog.StartGC()
 	go db.stat.StartStat()
 	return db

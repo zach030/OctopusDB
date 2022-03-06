@@ -191,6 +191,12 @@ func (b *blockIterator) setBlock(block *block) {
 	b.err = nil
 	b.data = block.data[:block.entriesIndexStart]
 	b.idx = 0
+	b.block = block
+	b.baseKey = b.baseKey[:0]
+	b.prevOverlap = 0
+	b.key = b.key[:0]
+	b.val = b.val[:0]
+	b.entryOffsets = block.entryOffsets
 }
 
 func (b *blockIterator) seekFirst() {

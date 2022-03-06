@@ -26,6 +26,5 @@ func TestLSM_openMemTable(t *testing.T) {
 	lsm := NewLSM(opt)
 
 	mem := lsm.openMemTable(uint64(1))
-	e := mem.Get([]byte("key"))
-	fmt.Println(string(e.Entry().Value))
+	fmt.Println(mem.Get([]byte("key")))
 }

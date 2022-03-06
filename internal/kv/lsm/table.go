@@ -58,7 +58,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		return nil
 	}
 	// 获取sst的最大key 需要使用迭代器
-	itr := t.NewIterator(&utils.Options{}) // 默认是降序
+	itr := t.NewIterator(&utils.Options{IsAsc: true}) // 默认是降序
 	defer itr.Close()
 	// 定位到初始位置就是最大的key
 	itr.Rewind()
@@ -103,7 +103,7 @@ func (t *table) block(idx int) (*block, error) {
 		return nil, errors.Errorf("block:%d out of index", idx)
 	}
 	var (
-		b   *block
+		b   = &block{}
 		err error
 	)
 	// query cache

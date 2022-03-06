@@ -53,7 +53,7 @@ func (l *LSM) Set(entry *utils.Entry) error {
 	if int64(l.memTable.wal.Size()) > l.cfg.MemTableSize {
 		l.imMemTable = append(l.imMemTable, l.memTable)
 		l.memTable = l.NewMemTable()
-		log.Info("memtable size is over limit, success new a memetable")
+		log.Info("[OverSize] memtable size is over limit, success new a memtable, curr immemtable size is:", len(l.imMemTable))
 	}
 	if err := l.memTable.Set(entry); err != nil {
 		return err
@@ -86,7 +86,10 @@ func (l *LSM) Get(key []byte) (*utils.Entry, error) {
 }
 
 func (l *LSM) StartCompaction() {
-	// todo 对sst文件进行合并
+	nums := l.cfg.NumCompactors
+	for i := 0; i < nums; i++ {
+		go l.levels.runCompacter(i)
+	}
 }
 
 // recover 重新构建内存索引
@@ -95,7 +98,6 @@ func (l *LSM) recover() (*MemTable, []*MemTable) {
 	if err != nil {
 		return nil, nil
 	}
-	log.Info("read files in current dir:", fs)
 	fid := make([]uint64, 0)
 	for _, f := range fs {
 		if !strings.HasSuffix(f.Name(), walFileExt) {
@@ -110,12 +112,11 @@ func (l *LSM) recover() (*MemTable, []*MemTable) {
 	sort.Slice(fid, func(i, j int) bool {
 		return fid[i] < fid[j]
 	})
-	log.Info("find wal files:", fid)
+	log.Info("[Recover] find wal files:", fid)
 	immt := make([]*MemTable, 0)
 	for _, i := range fid {
 		mt := l.openMemTable(i)
 		immt = append(immt, mt)
 	}
-	log.Info("success load wal files and rebuild memtables and immtables")
 	return l.NewMemTable(), immt
 }

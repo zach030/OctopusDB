@@ -1,25 +1,49 @@
 package kv
 
 import (
-	"log"
+	"fmt"
+	"math/rand"
+	"os"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
+var (
+	opt = NewDefaultOptions()
+)
+
+func clearDir() {
+	_, err := os.Stat(opt.WorkDir)
+	if err == nil {
+		os.RemoveAll(opt.WorkDir)
+	}
+	os.Mkdir(opt.WorkDir, os.ModePerm)
+}
+
+func TestClear(t *testing.T) {
+	clearDir()
+}
+
 func TestBasicSetGet(t *testing.T) {
-	opt := NewDefaultOptions()
+	clearDir()
 	db := Open(opt)
-	defer db.Close()
-	entry := utils.NewEntry([]byte("key"), []byte("value"))
-	if err := db.Set(entry); err != nil {
-		log.Fatal(err)
+	defer func() { _ = db.Close() }()
+	e := utils.NewEntry([]byte("key"), []byte("value"))
+	en, err := db.Get([]byte("key"))
+	db.Set(e)
+	for i := 0; i < 64; i++ {
+		e := newRandEntry(16)
+		db.Set(e)
 	}
-	e, err := db.Get([]byte("key"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	require.Equal(t, []byte("value"), e.Value)
+	en, err = db.Get([]byte("key"))
+	fmt.Println(string(en.Value), err)
+}
+
+func newRandEntry(sz int) *utils.Entry {
+	v := make([]byte, sz)
+	rand.Read(v[:rand.Intn(sz)])
+	e := utils.BuildEntry()
+	e.Value = v
+	return e
 }
