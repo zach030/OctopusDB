@@ -9,4 +9,7 @@ var (
 	ErrKeyNotExist = errors.New("key not exist")
 
 	ErrStop = errors.New("Stop")
+
+	// compact
+	ErrFillTables = errors.New("Unable to fill tables")
 )
