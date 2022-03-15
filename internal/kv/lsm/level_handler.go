@@ -18,6 +18,7 @@ type levelHandler struct {
 	totalStaleSize int64
 	tables         []*table
 	manager        *LevelManager
+	levelNum       int
 }
 
 func (h *levelHandler) close() error {
@@ -128,4 +129,8 @@ func (h *levelHandler) deleteTables(ts []*table) error {
 	h.tables = newTbls
 	h.Unlock()
 	return decrRefs(ts)
+}
+
+func (h *levelHandler) isLastLevel() bool {
+	return h.level == h.manager.cfg.MaxLevelNum-1
 }

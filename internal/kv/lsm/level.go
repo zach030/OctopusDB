@@ -10,12 +10,13 @@ import (
 )
 
 type LevelManager struct {
-	lsm          *LSM
-	manifestFile *file.ManifestFile // 记录level信息
-	cfg          *Config
-	levels       []*levelHandler // 对每个level操作的handler
-	cache        *cache          // 缓存
-	maxFID       uint64          // 当前最大fileID
+	lsm           *LSM
+	manifestFile  *file.ManifestFile // 记录level信息
+	cfg           *Config
+	levels        []*levelHandler // 对每个level操作的handler
+	cache         *cache          // 缓存
+	maxFID        uint64          // 当前最大fileID
+	compactStatus *compactStatus
 }
 
 func (l *LSM) initLevelManager(cfg *Config) *LevelManager {
@@ -47,9 +48,9 @@ func (l *LevelManager) build() error {
 	l.levels = make([]*levelHandler, 0, l.cfg.MaxLevelNum)
 	for i := 0; i < l.cfg.MaxLevelNum; i++ {
 		l.levels = append(l.levels, &levelHandler{
-			level:   0,
-			tables:  make([]*table, 0),
-			manager: l,
+			levelNum: i,
+			tables:   make([]*table, 0),
+			manager:  l,
 		})
 	}
 	// 从manifest中获取数据来构建
