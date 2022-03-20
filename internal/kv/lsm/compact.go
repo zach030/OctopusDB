@@ -2,6 +2,7 @@ package lsm
 
 import (
 	"log"
+	"math"
 	"math/rand"
 	"sort"
 	"sync"
@@ -11,9 +12,9 @@ import (
 )
 
 type compactionPriority struct {
-	level        int
-	score        float64
-	adjusted     float64
+	level        int     // 压缩来源层
+	score        float64 // 来源层得分
+	adjusted     float64 // 来源层调整得分
 	dropPrefixes [][]byte
 	t            targets
 }
@@ -25,23 +26,16 @@ type targets struct {
 	fileSz    []int64 // 每层文件的预期大小
 }
 
-type keyRange struct {
-	left  []byte
-	right []byte
-	inf   bool
-	size  int64 // size is used for Key splits.
-}
-
 // compactDef 一次合并任务
 type compactDef struct {
-	compactorId int
-	t           targets
-	p           compactionPriority
-	thisLevel   *levelHandler
-	nextLevel   *levelHandler
+	compactorID int                // 执行compact的任务id
+	t           targets            // 压缩目标
+	p           compactionPriority //
+	thisLevel   *levelHandler      // lx层
+	nextLevel   *levelHandler      // ly层 目标压缩层
 
-	top []*table
-	bot []*table
+	top    []*table
+	bottom []*table
 
 	thisRange keyRange
 	nextRange keyRange
@@ -50,6 +44,16 @@ type compactDef struct {
 	thisSize int64
 
 	dropPrefixes [][]byte
+}
+
+func (cd *compactDef) lockLevels() {
+	cd.thisLevel.RLock()
+	cd.nextLevel.RLock()
+}
+
+func (cd *compactDef) unlockLevels() {
+	cd.nextLevel.RUnlock()
+	cd.thisLevel.RUnlock()
 }
 
 func (l *LevelManager) runCompacter(id int) {
@@ -117,7 +121,7 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 		p.t = l.levelTarget()
 	}
 	cd := compactDef{
-		compactorId:  id,
+		compactorID:  id,
 		t:            p.t,
 		p:            p,
 		thisLevel:    l.levels[level],
@@ -125,6 +129,7 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 	}
 
 	if level == 0 {
+		// 从l0--l-base层的压缩
 		cd.nextLevel = l.levels[p.t.baseLevel]
 		if !l.compactTablesFromL0(&cd) {
 			return utils.ErrFillTables
@@ -158,7 +163,10 @@ func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 
 // compactTablesInL0 从l0--base的压缩，如果失败，尝试l0--l0的压缩
 func (l *LevelManager) compactTablesFromL0(task *compactDef) bool {
-	return true
+	if l.fillTablesL0ToLbase(task) {
+		return true
+	}
+	return l.fillTablesL0ToL0(task)
 }
 
 // compactTables
@@ -166,7 +174,60 @@ func (l *LevelManager) compactTables(task *compactDef) bool {
 	return true
 }
 
+// fillTablesL0ToLbase 从l0压缩到l-base
+func (l *LevelManager) fillTablesL0ToLbase(cd *compactDef) bool {
+	if cd.nextLevel.levelNum == 0 {
+		panic("next level not be 0")
+	}
+	if cd.p.adjusted > 0.0 && cd.p.adjusted < 1.0 {
+		log.Printf("no need to do compact ,adjusted is between 0-1")
+		return false
+	}
+	cd.lockLevels()
+	defer cd.unlockLevels()
+	// 获取this，next中压缩源与目标层的待压缩table，分别是top和bottom
+	top := cd.thisLevel.tables
+	if len(top) == 0 {
+		return false
+	}
+	out := make([]*table, 0)
+	kr := keyRange{}
+	// 在top中找到最大区间
+	for _, t := range top {
+		dkr := getKeyRange(t)
+		if kr.overlapsWith(dkr) {
+			out = append(out, t)
+			kr.extend(dkr)
+		} else {
+			// 因为按递增的顺序，如果发现有不重叠的，后面就不用判断
+			break
+		}
+	}
+	// 获取this层的合并后的区间
+	cd.thisRange = getKeyRange(out...)
+	cd.top = out
+
+	left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
+	bottom := make([]*table, right-left)
+	copy(bottom, cd.nextLevel.tables[left:right])
+
+	if len(bottom) == 0 {
+		cd.nextRange = cd.thisRange
+	} else {
+		cd.nextRange = getKeyRange(bottom...)
+	}
+
+	// 记录sst进入合并状态
+	return l.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd)
+}
+
+// fillTablesL0ToL0 l0--l0的压缩
+func (l *LevelManager) fillTablesL0ToL0(cd *compactDef) bool {
+	return true
+}
+
 func (l *LevelManager) pickCompactLevels() (prios []compactionPriority) {
+	// 拿到本次合并任务的目标层，和当前每层限制的数值
 	t := l.levelTarget()
 	// 记录compact优先级func
 	addPriority := func(level int, score float64) {
@@ -178,10 +239,10 @@ func (l *LevelManager) pickCompactLevels() (prios []compactionPriority) {
 		}
 		prios = append(prios, pri)
 	}
+	// 计算每一层的压缩优先级信息
 	addPriority(0, l.CalcL0Score())
 	for i := 1; i < len(l.levels); i++ {
 		// 处于压缩状态的sst 不能计算在内
-		// todo 获取正在压缩状态的sst文件大小
 		delSize := l.compactStatus.delSize(i)
 		level := l.levels[i]
 		sz := level.getTotalSize() - delSize
@@ -247,6 +308,7 @@ func improvePriorityOfL0(prios []compactionPriority) []compactionPriority {
 	return prios
 }
 
+// levelTarget 构建本次合并的目标
 func (l *LevelManager) levelTarget() targets {
 	var adjust = func(size int64) int64 {
 		// 调整baseLevelSize
@@ -321,4 +383,87 @@ func (cs *compactStatus) delSize(l int) int64 {
 	cs.RLock()
 	defer cs.RUnlock()
 	return cs.levels[l].delSize
+}
+
+type thisAndNextLevelRLocked struct{}
+
+func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef) bool {
+	// todo add compact sst status
+	return true
+}
+
+type keyRange struct {
+	left  []byte
+	right []byte
+	inf   bool
+	size  int64 // size is used for Key splits.
+}
+
+// getKeyRange 给定一定的sst，找出合并的最大区间
+func getKeyRange(tables ...*table) keyRange {
+	if len(tables) == 0 {
+		return keyRange{}
+	}
+	min := tables[0].sst.MinKey()
+	max := tables[0].sst.MaxKey()
+	for _, t := range tables {
+		if utils.CompareKeys(t.sst.MinKey(), min) < 0 {
+			min = t.sst.MinKey()
+		}
+		if utils.CompareKeys(t.sst.MaxKey(), max) > 0 {
+			max = t.sst.MaxKey()
+		}
+	}
+	return keyRange{
+		left:  utils.KeyWithTs(min, math.MaxUint64),
+		right: utils.KeyWithTs(max, 0),
+	}
+}
+
+// overlapsWith if k is overlap with dst
+// [k-min, k-max], [dst-min, dst-max]
+func (r keyRange) overlapsWith(dst keyRange) bool {
+	if r.isEmpty() {
+		return true
+	}
+	if dst.isEmpty() {
+		return false
+	}
+	// todo what's inf? infinite means overlap?
+	if r.inf || dst.inf {
+		return true
+	}
+	//              [k-min        k-max]
+	// [d-min,d-max]
+	if utils.CompareKeys(r.left, dst.right) > 0 {
+		return false
+	}
+	//  [k-min,k-max]
+	//              [d-min,d-max]
+	if utils.CompareKeys(dst.left, r.right) > 0 {
+		return false
+	}
+	return true
+}
+
+func (r keyRange) isEmpty() bool {
+	return len(r.left) == 0 && len(r.right) == 0 && !r.inf
+}
+
+func (r *keyRange) extend(kr keyRange) {
+	if kr.isEmpty() {
+		return
+	}
+	if r.isEmpty() {
+		*r = kr
+	}
+	if len(r.left) == 0 || utils.CompareKeys(kr.left, r.left) < 0 {
+		r.left = kr.left
+	}
+	if len(r.right) == 0 || utils.CompareKeys(kr.right, r.right) > 0 {
+		r.right = kr.right
+	}
+	if kr.inf {
+		r.inf = true
+	}
 }

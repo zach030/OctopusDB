@@ -27,3 +27,11 @@ func IsSameKey(src, dst []byte) bool {
 	}
 	return bytes.Equal(ParseKey(src), ParseKey(dst))
 }
+
+// KeyWithTs generates a new key by appending ts to key.
+func KeyWithTs(key []byte, ts uint64) []byte {
+	out := make([]byte, len(key)+8)
+	copy(out, key)
+	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
+	return out
+}

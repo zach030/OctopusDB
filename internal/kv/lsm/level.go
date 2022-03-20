@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"sort"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -133,4 +134,22 @@ func (l *LevelManager) lastLevel() *levelHandler {
 
 func (h *levelHandler) levelSize() int64 {
 	return h.totalSize
+}
+
+type levelHandlerRLocked struct{}
+
+// overlappingTables returns the tables that intersect with key range. Returns a half-interval.
+// This function should already have acquired a read lock, and this is so important the caller must
+// pass an empty parameter declaring such.
+func (h *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (int, int) {
+	if len(kr.left) == 0 || len(kr.right) == 0 {
+		return 0, 0
+	}
+	left := sort.Search(len(h.tables), func(i int) bool {
+		return utils.CompareKeys(kr.left, h.tables[i].sst.MaxKey()) <= 0
+	})
+	right := sort.Search(len(h.tables), func(i int) bool {
+		return utils.CompareKeys(kr.right, h.tables[i].sst.MaxKey()) < 0
+	})
+	return left, right
 }
