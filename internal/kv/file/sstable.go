@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"syscall"
+	"time"
 
 	"github.com/prometheus/common/log"
 
@@ -26,6 +28,8 @@ type SSTable struct {
 	// store min/max key: faster to judge if the key is in current sst file
 	minKey []byte // min key in current table
 	maxKey []byte // max key for current table
+
+	createdAt time.Time
 }
 
 func OpenSSTable(option *Option) *SSTable {
@@ -42,6 +46,10 @@ func (s *SSTable) Init() error {
 	if err != nil {
 		return err
 	}
+	// 从文件中获取创建时间
+	stat, _ := s.mf.Fd.Stat()
+	statType := stat.Sys().(*syscall.Stat_t)
+	s.createdAt = time.Unix(statType.Ctimespec.Sec, statType.Ctimespec.Nsec)
 	s.minKey = blockMeta.GetKey()
 	blocks := len(s.tableIdx.GetOffsets())
 	s.maxKey = s.tableIdx.GetOffsets()[blocks-1].Key
@@ -140,4 +148,14 @@ func (s *SSTable) Index() *pb.TableIndex {
 
 func (s *SSTable) Bytes(off, sz int) ([]byte, error) {
 	return s.mf.Bytes(off, sz)
+}
+
+// GetCreatedAt _
+func (s *SSTable) GetCreatedAt() *time.Time {
+	return &s.createdAt
+}
+
+// SetCreatedAt _
+func (s *SSTable) SetCreatedAt(t *time.Time) {
+	s.createdAt = *t
 }

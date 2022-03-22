@@ -174,7 +174,7 @@ func (l *LevelManager) compactTables(task *compactDef) bool {
 	return true
 }
 
-// fillTablesL0ToLbase 从l0压缩到l-base
+// fillTablesL0ToLbase 从l0压缩到l-base，获取l0层最大压缩区间，获取lbase的压缩区间，再检查是否有冲突的合并区间
 func (l *LevelManager) fillTablesL0ToLbase(cd *compactDef) bool {
 	if cd.nextLevel.levelNum == 0 {
 		panic("next level not be 0")
@@ -223,6 +223,27 @@ func (l *LevelManager) fillTablesL0ToLbase(cd *compactDef) bool {
 
 // fillTablesL0ToL0 l0--l0的压缩
 func (l *LevelManager) fillTablesL0ToL0(cd *compactDef) bool {
+	if cd.compactorID != 0 {
+		return false
+	}
+	cd.nextLevel = l.levels[0]
+	cd.nextRange = keyRange{}
+	now := time.Now()
+	top := cd.thisLevel.tables
+	out := make([]*table, 0)
+	for _, t := range top {
+		if t.Size() >= 2*cd.t.fileSz[0] {
+			// 在L0 to L0 的压缩过程中，不要对过大的sst文件压缩，这会造成性能抖动
+			continue
+		}
+		if now.Sub(*t.GetCreatedAt()) < 10*time.Second {
+			continue
+		}
+		if _, ok := l.compactStatus.tables[t.fid]; ok {
+			continue
+		}
+		out = append(out, t)
+	}
 	return true
 }
 
@@ -385,10 +406,36 @@ func (cs *compactStatus) delSize(l int) int64 {
 	return cs.levels[l].delSize
 }
 
+func (lcs *levelCompactStatus) overlapsWith(dst keyRange) bool {
+	for _, r := range lcs.ranges {
+		if r.overlapsWith(dst) {
+			return true
+		}
+	}
+	return false
+}
+
 type thisAndNextLevelRLocked struct{}
 
+// compareAndAdd 比较本次要合并的区间与正在执行的任务是否冲突，记录合并状态
 func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef) bool {
-	// todo add compact sst status
+	cs.Lock()
+	defer cs.Unlock()
+	thisLevel := cs.levels[cd.thisLevel.levelNum]
+	nextLevel := cs.levels[cd.nextLevel.levelNum]
+	// 如果本次合并的区间与正在合并的任务区间冲突，则取消本次任务
+	if thisLevel.overlapsWith(cd.thisRange) {
+		return false
+	}
+	if nextLevel.overlapsWith(cd.nextRange) {
+		return false
+	}
+	thisLevel.ranges = append(thisLevel.ranges, cd.thisRange)
+	nextLevel.ranges = append(nextLevel.ranges, cd.nextRange)
+	thisLevel.delSize += cd.thisSize
+	for _, t := range append(cd.top, cd.bottom...) {
+		cs.tables[t.fid] = struct{}{}
+	}
 	return true
 }
 

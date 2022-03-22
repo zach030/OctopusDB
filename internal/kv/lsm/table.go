@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/zach030/OctopusDB/internal/kv/pb"
 
@@ -177,4 +178,9 @@ func (t *table) FormatCacheKey(idx int) []byte {
 	binary.BigEndian.PutUint32(buf[:4], uint32(t.fid))
 	binary.BigEndian.PutUint32(buf[4:], uint32(idx))
 	return buf
+}
+
+// GetCreatedAt
+func (t *table) GetCreatedAt() *time.Time {
+	return t.sst.GetCreatedAt()
 }
