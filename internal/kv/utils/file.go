@@ -90,3 +90,9 @@ func CompareKeys(key1, key2 []byte) int {
 	// compare timestamp then
 	return bytes.Compare(key1[len(key1)-8:], key2[len(key2)-8:])
 }
+
+func Copy(a []byte) []byte {
+	b := make([]byte, len(a))
+	copy(b, a)
+	return b
+}

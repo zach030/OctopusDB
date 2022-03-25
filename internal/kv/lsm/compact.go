@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
@@ -158,7 +159,52 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 }
 
 func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
+	// todo 具体执行合并任务
+	if len(cd.t.fileSz) == 0 {
+		return errors.New("Filesizes cannot be zero. Targets are not set")
+	}
+	// timeStart := time.Now()
+	thisLevel := cd.thisLevel
+	nextLevel := cd.nextLevel
+
+	if thisLevel != nextLevel {
+		// 分解任务
+	}
+	// 分解cd
+	// 执行合并
+	// 更新manifest
+	// 输出日志，记录本次合并耗时
 	return
+}
+
+func (l *LevelManager) addSplits(cd *compactDef) {
+	cd.splits = cd.splits[:0]
+
+	width := int(math.Ceil(float64(len(cd.bottom)) / 5.0))
+	if width < 3 {
+		width = 3
+	}
+	skr := cd.thisRange
+	skr.extend(cd.nextRange)
+
+	addRange := func(right []byte) {
+		skr.right = utils.Copy(right)
+		cd.splits = append(cd.splits, skr)
+		skr.left = skr.right
+	}
+
+	for i, t := range cd.bottom {
+		// last entry in bottom table.
+		if i == len(cd.bottom)-1 {
+			addRange([]byte{})
+			return
+		}
+		if i%width == width-1 {
+			// 设置最大值为右区间
+			right := utils.KeyWithTs(utils.ParseKey(t.sst.MaxKey()), math.MaxUint64)
+			addRange(right)
+		}
+	}
 }
 
 // compactTablesInL0 从l0--base的压缩，如果失败，尝试l0--l0的压缩
@@ -169,9 +215,68 @@ func (l *LevelManager) compactTablesFromL0(task *compactDef) bool {
 	return l.fillTablesL0ToL0(task)
 }
 
-// compactTables
-func (l *LevelManager) compactTables(task *compactDef) bool {
+// compactTables 常规的从lx--ly的压缩
+func (l *LevelManager) compactTables(cd *compactDef) bool {
+	cd.lockLevels()
+	defer cd.unlockLevels()
+
+	tables := make([]*table, cd.thisLevel.levelNum)
+	copy(tables, cd.thisLevel.tables)
+	if len(tables) == 0 {
+		return false
+	}
+	// 如果当前是最后一层，则执行max--max的压缩
+	if cd.thisLevel.isLastLevel() {
+		return l.compactMaxLevelTables(tables, cd)
+	}
+	l.sortWithVersion(tables, cd)
+	for _, t := range tables {
+		cd.thisSize = t.Size()
+		cd.thisRange = getKeyRange(t)
+		if l.compactStatus.overlapsWith(cd.thisLevel.levelNum, cd.thisRange) {
+			// 如果thisRange与正在合并的区间有重合，就跳过
+			continue
+		}
+		cd.top = []*table{t}
+		left, right := cd.nextLevel.overlappingTables(levelHandlerRLocked{}, cd.thisRange)
+
+		cd.bottom = make([]*table, right-left)
+		copy(cd.bottom, cd.nextLevel.tables[left:right])
+
+		if len(cd.bottom) == 0 {
+			cd.bottom = []*table{}
+			cd.nextRange = cd.thisRange
+			if !l.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+				continue
+			}
+			return true
+		}
+		cd.nextRange = getKeyRange(cd.bottom...)
+		// 判断目标层级待压缩区间是否有冲突
+		if l.compactStatus.overlapsWith(cd.nextLevel.levelNum, cd.nextRange) {
+			continue
+		}
+		if !l.compactStatus.compareAndAdd(thisAndNextLevelRLocked{}, *cd) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// compactMaxLevelTables 从max--max的同级压缩
+func (l *LevelManager) compactMaxLevelTables(tables []*table, cd *compactDef) bool {
 	return true
+}
+
+// sortWithVersion 根据数据版本排序，把旧版本放在前面，优先合并
+func (l *LevelManager) sortWithVersion(tables []*table, cd *compactDef) {
+	if len(tables) == 0 || cd.nextLevel == nil {
+		return
+	}
+	sort.Slice(tables, func(i, j int) bool {
+		return tables[i].sst.Index().MaxVersion < tables[j].sst.Index().MaxVersion
+	})
 }
 
 // fillTablesL0ToLbase 从l0压缩到l-base，获取l0层最大压缩区间，获取lbase的压缩区间，再检查是否有冲突的合并区间
@@ -437,6 +542,15 @@ func (cs *compactStatus) compareAndAdd(_ thisAndNextLevelRLocked, cd compactDef)
 		cs.tables[t.fid] = struct{}{}
 	}
 	return true
+}
+
+// overlapsWith 判断当前level是否有正在合并的区间与我们此次待合并区间重合
+func (cs *compactStatus) overlapsWith(level int, this keyRange) bool {
+	cs.RLock()
+	defer cs.RUnlock()
+
+	thisLevel := cs.levels[level]
+	return thisLevel.overlapsWith(this)
 }
 
 type keyRange struct {

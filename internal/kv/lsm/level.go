@@ -145,6 +145,7 @@ func (h *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (in
 	if len(kr.left) == 0 || len(kr.right) == 0 {
 		return 0, 0
 	}
+	// 找到与kr有重合的tables索引左右边界
 	left := sort.Search(len(h.tables), func(i int) bool {
 		return utils.CompareKeys(kr.left, h.tables[i].sst.MaxKey()) <= 0
 	})
