@@ -286,7 +286,12 @@ func newCreateChange(id uint64, level int, checksum []byte) *pb.ManifestModify {
 	}
 }
 
+func (f *ManifestFile) AddChanges(changesParam []*pb.ManifestModify) error {
+	return f.addChanges(changesParam)
+}
+
 func (f *ManifestFile) addChanges(changesParam []*pb.ManifestModify) error {
+	// todo add changes to manifest
 	return nil
 }
 

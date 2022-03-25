@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zach030/OctopusDB/internal/kv/pb"
+
 	"github.com/pkg/errors"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -166,23 +168,64 @@ func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 	// timeStart := time.Now()
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
-
+	// 分解cd
 	if thisLevel != nextLevel {
 		// 分解任务
+		l.addSplits(&cd)
 	}
-	// 分解cd
+	if len(cd.splits) == 0 {
+		cd.splits = append(cd.splits, keyRange{})
+	}
 	// 执行合并
+	newTbls, decr, err := l.compactBuildTables(level, cd)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if decErr := decr(); err == nil {
+			err = decErr
+		}
+	}()
 	// 更新manifest
+	modifies := l.addManifestModifySet(&cd, newTbls)
 	// 输出日志，记录本次合并耗时
+	if err := l.manifestFile.AddChanges(modifies.Modifies); err != nil {
+		return err
+	}
 	return
+}
+
+// compactBuildTables 核心的压缩实现
+func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, func() error, error) {
+	return nil, nil, nil
+}
+
+func (l *LevelManager) addManifestModifySet(cd *compactDef, newTables []*table) pb.ManifestModifies {
+	changes := make([]*pb.ManifestModify, 0)
+	for _, tbl := range newTables {
+		changes = append(changes, &pb.ManifestModify{
+			Id:    tbl.fid,
+			Op:    pb.ManifestModify_CREATE,
+			Level: uint32(cd.nextLevel.levelNum),
+		})
+	}
+	for _, tbl := range append(cd.top, cd.bottom...) {
+		changes = append(changes, &pb.ManifestModify{
+			Id:    tbl.fid,
+			Op:    pb.ManifestModify_DELETE,
+			Level: uint32(cd.nextLevel.levelNum),
+		})
+	}
+	return pb.ManifestModifies{Modifies: changes}
 }
 
 func (l *LevelManager) addSplits(cd *compactDef) {
 	cd.splits = cd.splits[:0]
 
-	width := int(math.Ceil(float64(len(cd.bottom)) / 5.0))
-	if width < 3 {
-		width = 3
+	// 分成5组
+	group := int(math.Ceil(float64(len(cd.bottom)) / 5.0))
+	if group < 3 {
+		group = 3
 	}
 	skr := cd.thisRange
 	skr.extend(cd.nextRange)
@@ -190,6 +233,7 @@ func (l *LevelManager) addSplits(cd *compactDef) {
 	addRange := func(right []byte) {
 		skr.right = utils.Copy(right)
 		cd.splits = append(cd.splits, skr)
+		// left右移，将skr分片
 		skr.left = skr.right
 	}
 
@@ -199,7 +243,7 @@ func (l *LevelManager) addSplits(cd *compactDef) {
 			addRange([]byte{})
 			return
 		}
-		if i%width == width-1 {
+		if i%group == group-1 {
 			// 设置最大值为右区间
 			right := utils.KeyWithTs(utils.ParseKey(t.sst.MaxKey()), math.MaxUint64)
 			addRange(right)
