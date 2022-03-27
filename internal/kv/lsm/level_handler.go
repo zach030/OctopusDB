@@ -134,3 +134,34 @@ func (h *levelHandler) deleteTables(ts []*table) error {
 func (h *levelHandler) isLastLevel() bool {
 	return h.level == h.manager.cfg.MaxLevelNum-1
 }
+
+// ReplaceTables after compact, replace old tables with new tables
+func (h *levelHandler) ReplaceTables(old, new []*table) error {
+	h.Lock()
+	// 从原来本层的tables中删除old
+	// 将剩下的table与new组合成本层的新tables
+	oldTables := make(map[uint64]struct{})
+	for _, t := range old {
+		oldTables[t.fid] = struct{}{}
+	}
+	newTables := make([]*table, 0)
+	for _, t := range h.tables {
+		if _, ok := oldTables[t.fid]; !ok {
+			// 不在被删除的旧table中，仍然保存new
+			newTables = append(newTables, t)
+		} else {
+			h.subtractSize(t)
+		}
+	}
+	for _, t := range new {
+		h.addSize(t)
+		t.IncrRef()
+		newTables = append(newTables, t)
+	}
+	h.tables = newTables
+	sort.Slice(h.tables, func(i, j int) bool {
+		return utils.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
+	})
+	h.Unlock()
+	return decrRefs(old)
+}

@@ -35,3 +35,8 @@ func KeyWithTs(key []byte, ts uint64) []byte {
 	binary.BigEndian.PutUint64(out[len(key):], math.MaxUint64-ts)
 	return out
 }
+
+// SafeCopy does append(a[:0], src...).
+func SafeCopy(a, src []byte) []byte {
+	return append(a[:0], src...)
+}

@@ -1,11 +1,14 @@
 package lsm
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zach030/OctopusDB/internal/kv/pb"
@@ -80,7 +83,7 @@ func (l *LevelManager) runCompacter(id int) {
 
 // runOnce 执行一次压缩任务
 func (l *LevelManager) runOnce(id int) bool {
-	// 生成本次压缩的任务
+	// 生成本次压缩的任务,一组压缩比超过1的任务
 	prios := l.pickCompactLevels()
 	if id == 0 {
 		// 如果0号协程则压缩l0层
@@ -99,7 +102,7 @@ func (l *LevelManager) runOnce(id int) bool {
 	return true
 }
 
-// run 执行一个优先级指定的合并任务
+// run 执行一个优先级指定的合并任务，已知从lx--ly，需要确定具体的压缩区间
 func (l *LevelManager) run(id int, p compactionPriority) bool {
 	err := l.doCompact(id, p)
 	switch err {
@@ -113,7 +116,7 @@ func (l *LevelManager) run(id int, p compactionPriority) bool {
 	return false
 }
 
-// doCompact 执行合并任务,将level层的某些文件合并到target层中
+// doCompact 执行合并任务,将level层的某些文件合并到target层中,生成具体的压缩任务:计算压缩区间top,bottom
 func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 	level := p.level
 	if p.level >= l.cfg.MaxLevelNum {
@@ -160,12 +163,13 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 	return nil
 }
 
+// runCompactDef 执行压缩计划
 func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 	// todo 具体执行合并任务
 	if len(cd.t.fileSz) == 0 {
 		return errors.New("Filesizes cannot be zero. Targets are not set")
 	}
-	// timeStart := time.Now()
+	timeStart := time.Now()
 	thisLevel := cd.thisLevel
 	nextLevel := cd.nextLevel
 	// 分解cd
@@ -176,7 +180,7 @@ func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 	if len(cd.splits) == 0 {
 		cd.splits = append(cd.splits, keyRange{})
 	}
-	// 执行合并
+	// 具体执行压缩，返回压缩后的新tables，作为nextLevel新的tables
 	newTbls, decr, err := l.compactBuildTables(level, cd)
 	if err != nil {
 		return err
@@ -188,16 +192,215 @@ func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 	}()
 	// 更新manifest
 	modifies := l.addManifestModifySet(&cd, newTbls)
-	// 输出日志，记录本次合并耗时
 	if err := l.manifestFile.AddChanges(modifies.Modifies); err != nil {
 		return err
+	}
+	// 更新nextLevel的table列表
+	if err := nextLevel.ReplaceTables(cd.bottom, newTbls); err != nil {
+		return err
+	}
+	// 更新thisLevel的table列表
+	if err := thisLevel.deleteTables(cd.top); err != nil {
+		return err
+	}
+	defer decrRefs(cd.top)
+	// 输出日志，记录本次合并耗时
+	from := append(tablesToString(cd.top), tablesToString(cd.bottom)...)
+	to := tablesToString(newTbls)
+	if dur := time.Since(timeStart); dur > 2*time.Second {
+		var expensive string
+		if dur > time.Second {
+			expensive = " [E]"
+		}
+		fmt.Printf("[%d]%s LOG Compact %d->%d (%d, %d -> %d tables with %d splits)."+
+			" [%s] -> [%s], took %v\n",
+			id, expensive, thisLevel.levelNum, nextLevel.levelNum, len(cd.top), len(cd.bottom),
+			len(newTbls), len(cd.splits), strings.Join(from, " "), strings.Join(to, " "),
+			dur.Round(time.Millisecond))
 	}
 	return
 }
 
-// compactBuildTables 核心的压缩实现
+// tablesToString
+func tablesToString(tables []*table) []string {
+	var res []string
+	for _, t := range tables {
+		res = append(res, fmt.Sprintf("%05d", t.fid))
+	}
+	res = append(res, ".")
+	return res
+}
+
+// compactBuildTables 核心的压缩实现，将thisLevel.top与nextLevel.bottom进行合并压缩，生成newTables
 func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, func() error, error) {
-	return nil, nil, nil
+	topTables := cd.top
+	botTables := cd.bottom
+	iterOpt := &utils.Options{
+		IsAsc: true,
+	}
+	//numTables := int64(len(topTables) + len(botTables))
+
+	newIterator := func() []utils.Iterator {
+		// Create iterators across all the tables involved first.
+		var iters []utils.Iterator
+		switch {
+		case lev == 0:
+			iters = append(iters, reversedIterators(topTables, iterOpt)...)
+		case len(topTables) > 0:
+			iters = []utils.Iterator{topTables[0].NewIterator(iterOpt)}
+		}
+		return append(iters, NewConcatIterator(botTables, iterOpt))
+	}
+
+	// 开始并行执行压缩过程，流式处理提高效率
+	res := make(chan *table, 3)
+	// 限定并发协程数为split+8
+	inflightBuilders := utils.NewThrottle(8 + len(cd.splits))
+	for _, kr := range cd.splits {
+		// Initiate Do here so we can register the goroutines for buildTables too.
+		if err := inflightBuilders.Do(); err != nil {
+			return nil, nil, fmt.Errorf("cannot start subcompaction: %+v", err)
+		}
+		// 开启一个协程去处理子压缩
+		go func(kr keyRange) {
+			defer inflightBuilders.Done(nil)
+			it := NewMergeIterator(newIterator(), false)
+			defer it.Close()
+			// 核心实现子压缩
+			l.subcompact(it, kr, cd, inflightBuilders, res)
+		}(kr)
+	}
+
+	// mapreduce的方式收集table的句柄
+	var newTables []*table
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for t := range res {
+			// subcompact在做子压缩，向chan发送数据，这里遍历channel读数据
+			newTables = append(newTables, t)
+		}
+	}()
+
+	// 在这里等待所有的压缩过程完成
+	err := inflightBuilders.Finish()
+	// channel 资源回收
+	close(res)
+	// 等待所有的builder刷到磁盘
+	wg.Wait()
+
+	if err == nil {
+		// 同步刷盘，保证数据一定落盘
+		err = utils.SyncDir(l.cfg.WorkDir)
+	}
+
+	if err != nil {
+		// 如果出现错误，则删除索引新创建的文件
+		_ = decrRefs(newTables)
+		return nil, nil, fmt.Errorf("while running compactions for: %+v, %v", cd, err)
+	}
+
+	sort.Slice(newTables, func(i, j int) bool {
+		return utils.CompareKeys(newTables[i].sst.MaxKey(), newTables[j].sst.MaxKey()) < 0
+	})
+	return newTables, func() error { return decrRefs(newTables) }, nil
+}
+
+// 真正执行并行压缩的子压缩文件
+func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef, inflightBuilders *utils.Throttle, res chan<- *table) {
+	var lastKey []byte
+	addKeys := func(builder *tableBuilder) {
+		var tableKr keyRange
+		for ; it.Valid(); it.Next() {
+			key := it.Item().Entry().Key
+			//version := utils.ParseTs(key)
+			isExpired := isDeletedOrExpired(0, it.Item().Entry().ExpiresAt)
+			if !utils.IsSameKey(key, lastKey) {
+				// 如果迭代器返回的key大于当前key的范围就不用执行了
+				if len(kr.right) > 0 && utils.CompareKeys(key, kr.right) >= 0 {
+					break
+				}
+				if builder.ReachedCapacity() {
+					// 如果超过预估的sst文件大小，则直接结束
+					break
+				}
+				// 把当前的key变为 lastKey
+				lastKey = utils.SafeCopy(lastKey, key)
+				//umVersions = 0
+				// 如果左边界没有，则当前key给到左边界
+				if len(tableKr.left) == 0 {
+					tableKr.left = utils.SafeCopy(tableKr.left, key)
+				}
+				// 更新右边界
+				tableKr.right = lastKey
+			}
+			// TODO 这里要区分值的指针
+			// 判断是否是过期内容，是的话就删除
+			switch {
+			case isExpired:
+				builder.AddStaleKey(it.Item().Entry())
+			default:
+				builder.AddKey(it.Item().Entry())
+			}
+		}
+	} // End of function: addKeys
+
+	//如果 key range left还存在 则seek到这里 说明遍历中途停止了
+	if len(kr.left) > 0 {
+		it.Seek(kr.left)
+	} else {
+		//
+		it.Rewind()
+	}
+	for it.Valid() {
+		key := it.Item().Entry().Key
+		if len(kr.right) > 0 && utils.CompareKeys(key, kr.right) >= 0 {
+			break
+		}
+		// 拼装table创建的参数
+		// TODO 这里可能要大改，对open table的参数复制一份opt
+		builder := newTableBuilderWithSSTSize(l.cfg, cd.t.fileSz[cd.nextLevel.levelNum])
+
+		// This would do the iteration and add keys to builder.
+		addKeys(builder)
+
+		// It was true that it.Valid() at least once in the loop above, which means we
+		// called Add() at least once, and builder is not Empty().
+		if builder.empty() {
+			// Cleanup builder resources:
+			builder.finish()
+			builder.Close()
+			continue
+		}
+		if err := inflightBuilders.Do(); err != nil {
+			// Can't return from here, until I decrRef all the tables that I built so far.
+			break
+		}
+		// 充分发挥 ssd的并行 写入特性
+		go func(builder *tableBuilder) {
+			defer inflightBuilders.Done(nil)
+			defer builder.Close()
+			var tbl *table
+			newFID := atomic.AddUint64(&l.maxFID, 1) // compact的时候是没有memtable的，这里自增maxFID即可。
+			// TODO 这里的sst文件需要根据level大小变化
+			sstName := utils.SSTFullFileName(l.cfg.WorkDir, newFID)
+			tbl = openTable(l, sstName, builder)
+			if tbl == nil {
+				return
+			}
+			res <- tbl
+		}(builder)
+	}
+}
+
+func reversedIterators(th []*table, opt *utils.Options) []utils.Iterator {
+	out := make([]utils.Iterator, 0, len(th))
+	for i := len(th) - 1; i >= 0; i-- {
+		// This will increment the reference of the table handler.
+		out = append(out, th[i].NewIterator(opt))
+	}
+	return out
 }
 
 func (l *LevelManager) addManifestModifySet(cd *compactDef, newTables []*table) pb.ManifestModifies {
@@ -671,4 +874,12 @@ func (r *keyRange) extend(kr keyRange) {
 	if kr.inf {
 		r.inf = true
 	}
+}
+
+// 判断是否过期 是可删除
+func isDeletedOrExpired(meta byte, expiresAt uint64) bool {
+	if expiresAt == 0 {
+		return false
+	}
+	return expiresAt <= uint64(time.Now().Unix())
 }

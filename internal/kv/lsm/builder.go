@@ -85,11 +85,47 @@ func (h header) encode() []byte {
 	return b[:]
 }
 
+func newTableBuilderWithSSTSize(opt *Config, size int64) *tableBuilder {
+	return &tableBuilder{
+		cfg:     opt,
+		sstSize: size,
+	}
+}
+
 func newTableBuilder(cfg *Config) *tableBuilder {
 	return &tableBuilder{
 		cfg:     cfg,
 		sstSize: cfg.SSTableMaxSz, // sst max size
 	}
+}
+
+func (tb *tableBuilder) empty() bool { return len(tb.keyHashes) == 0 }
+
+func (tb *tableBuilder) finish() []byte {
+	bd := tb.done()
+	buf := make([]byte, bd.size)
+	written := bd.Copy(buf)
+	if written == len(buf) {
+		panic("written == len(buf)")
+	}
+	return buf
+}
+
+// Close closes the TableBuilder.
+func (tb *tableBuilder) Close() {
+	// 结合内存分配器
+}
+
+// AddStaleKey 记录陈旧key所占用的空间大小，用于日志压缩时的决策
+func (tb *tableBuilder) AddStaleKey(e *utils.Entry) {
+	// Rough estimate based on how much space it will occupy in the SST.
+	tb.staleDataSize += len(e.Key) + len(e.Value) + 4 /* entry offset */ + 4 /* header size */
+	tb.add(e, true)
+}
+
+// AddKey _
+func (tb *tableBuilder) AddKey(e *utils.Entry) {
+	tb.add(e, false)
 }
 
 func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
@@ -336,4 +372,8 @@ func (tb *tableBuilder) writeBlockOffset(bl *block, startOffset uint32) *pb.Bloc
 	offset.Len = uint32(bl.end)
 	offset.Offset = startOffset
 	return offset
+}
+
+func (tb *tableBuilder) ReachedCapacity() bool {
+	return tb.estimateSz > tb.sstSize
 }

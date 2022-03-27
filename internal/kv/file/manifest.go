@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -21,6 +22,7 @@ type ManifestFile struct {
 	f        *os.File
 	option   *Option
 	manifest *Manifest
+	lock     sync.Mutex
 }
 
 // Manifest 存放当前kv的level元数据
@@ -61,7 +63,7 @@ func OpenManifestFile(opt *Option) (*ManifestFile, error) {
 		// 如果文件不存在，则新写manifest
 		m := newManifest()
 		// 覆盖写manifest文件
-		fp, err1 := RewriteManifest(opt.Dir, m)
+		fp, _, err1 := RewriteManifest(opt.Dir, m)
 		if err1 != nil {
 			return nil, err1
 		}
@@ -118,10 +120,10 @@ func newCreateModify(id uint64, level int, checksum []byte) *pb.ManifestModify {
 }
 
 // RewriteManifest 覆盖写manifest文件
-func RewriteManifest(dir string, m *Manifest) (*os.File, error) {
+func RewriteManifest(dir string, m *Manifest) (*os.File, int, error) {
 	f, err := os.OpenFile(filepath.Join(dir, utils.ReManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	buf := make([]byte, 8)
 	// magic-num | version
@@ -131,8 +133,9 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, error) {
 	modifyBuf, err := modifies.Marshal()
 	if err != nil {
 		f.Close()
-		return nil, err
+		return nil, 0, err
 	}
+	netCreations := len(m.Tables)
 	var crcBuf [8]byte
 	// length of modify | crc
 	binary.BigEndian.PutUint32(crcBuf[0:4], uint32(len(modifyBuf)))
@@ -141,34 +144,34 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, error) {
 	buf = append(buf, modifyBuf...)
 	if _, err := f.Write(buf); err != nil {
 		f.Close()
-		return nil, err
+		return nil, 0, err
 	}
 	// 同步写磁盘
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return nil, err
+		return nil, 0, err
 	}
 	// 关闭文件，进行rename
 	if err = f.Close(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err = os.Rename(filepath.Join(dir, utils.ReManifestFileName), filepath.Join(dir, utils.ManifestFileName)); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	fp, err := os.OpenFile(filepath.Join(dir, utils.ManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		fp.Close()
-		return nil, err
+		return nil, 0, err
 	}
 	if _, err = fp.Seek(0, io.SeekEnd); err != nil {
 		fp.Close()
-		return nil, err
+		return nil, 0, err
 	}
 	if err = fp.Sync(); err != nil {
 		fp.Close()
-		return nil, err
+		return nil, 0, err
 	}
-	return fp, nil
+	return fp, netCreations, nil
 }
 
 func ReplayManifest(f *os.File) (*Manifest, int64, error) {
@@ -292,6 +295,48 @@ func (f *ManifestFile) AddChanges(changesParam []*pb.ManifestModify) error {
 
 func (f *ManifestFile) addChanges(changesParam []*pb.ManifestModify) error {
 	// todo add changes to manifest
+	changes := pb.ManifestModifies{Modifies: changesParam}
+	buf, err := changes.Marshal()
+	if err != nil {
+		return err
+	}
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	if err := f.manifest.applyModifies(changes); err != nil {
+		return err
+	}
+	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
+	if f.manifest.Deletions > utils.ManifestDeletionsRewriteThreshold &&
+		f.manifest.Deletions > utils.ManifestDeletionsRatio*(f.manifest.Creations-f.manifest.Deletions) {
+		if err := f.rewrite(); err != nil {
+			return err
+		}
+	} else {
+		var lenCrcBuf [8]byte
+		binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(buf)))
+		binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(buf, utils.CastagnoliCrcTable))
+		buf = append(lenCrcBuf[:], buf...)
+		if _, err := f.f.Write(buf); err != nil {
+			return err
+		}
+	}
+	err = f.f.Sync()
+	return err
+}
+
+// Must be called while appendLock is held.
+func (f *ManifestFile) rewrite() error {
+	// In Windows the files should be closed before doing a Rename.
+	if err := f.f.Close(); err != nil {
+		return err
+	}
+	fp, nextCreations, err := RewriteManifest(f.option.Dir, f.manifest)
+	if err != nil {
+		return err
+	}
+	f.manifest.Creations = nextCreations
+	f.manifest.Deletions = 0
+	f.f = fp
 	return nil
 }
 

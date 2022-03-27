@@ -86,6 +86,7 @@ func (l *LSM) Get(key []byte) (*utils.Entry, error) {
 }
 
 func (l *LSM) StartCompaction() {
+	// 初始化lsm时会启动NumCompactors个协程，用来后台执行合并压缩
 	nums := l.cfg.NumCompactors
 	for i := 0; i < nums; i++ {
 		go l.levels.runCompacter(i)
