@@ -100,7 +100,7 @@ func (s *Arena) getElementOffset(e *Element) uint32 {
 }
 
 func (e *Element) getNextOffset(h int) uint32 {
-	return atomic.LoadUint32(&e.levels[h])
+	return atomic.LoadUint32(&e.tower[h])
 }
 
 func (s *Arena) Size() int64 {

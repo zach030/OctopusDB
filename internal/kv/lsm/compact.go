@@ -66,7 +66,9 @@ func (l *LevelManager) runCompacter(id int) {
 	randomDelay := time.NewTimer(time.Duration(rand.Intn(1000)) * time.Millisecond)
 	select {
 	case <-randomDelay.C:
-
+	case <-l.lsm.closer.CloseSignal:
+		randomDelay.Stop()
+		return
 	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -75,8 +77,8 @@ func (l *LevelManager) runCompacter(id int) {
 		// Can add a done channel or other stuff.
 		case <-ticker.C:
 			l.runOnce(id)
-			//case <-lm.lsm.closer.CloseSignal:
-			//	return
+		case <-l.lsm.closer.CloseSignal:
+			return
 		}
 	}
 }
@@ -696,7 +698,7 @@ func (l *LevelManager) levelTarget() targets {
 	}
 	// 从最后一层开始遍历
 	dbSize := l.lastLevelSize()
-	for i := len(l.levels) - 1; i > 0; i++ {
+	for i := len(l.levels) - 1; i > 0; i-- {
 		targetSize := adjust(dbSize)
 		t.targetSz[i] = targetSize
 		if t.baseLevel == 0 && targetSize <= l.cfg.BaseLevelSize {

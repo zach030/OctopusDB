@@ -347,3 +347,11 @@ func (f *ManifestFile) AddTableMeta(levelNum int, t *TableMeta) (err error) {
 	})
 	return err
 }
+
+// Close 关闭文件
+func (f *ManifestFile) Close() error {
+	if err := f.f.Close(); err != nil {
+		return err
+	}
+	return nil
+}

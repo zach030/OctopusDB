@@ -35,6 +35,7 @@ func Benchmark_SkipListBasicCRUD(b *testing.B) {
 	list := NewSkipList(1000)
 	key, val := "", ""
 	maxTime := 1000000
+	// todo skiplist benchmark need to update
 	for i := 0; i < maxTime; i++ {
 		//number := rand.Intn(10000)
 		key, val = fmt.Sprintf("Key%d", i), fmt.Sprintf("Val%d", i)

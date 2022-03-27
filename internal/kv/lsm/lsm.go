@@ -16,6 +16,7 @@ type LSM struct {
 	imMemTable []*MemTable
 	cfg        *Config
 	levels     *LevelManager
+	closer     *utils.Closer
 	maxMemFd   uint64
 }
 
@@ -41,10 +42,29 @@ func NewLSM(cfg *Config) *LSM {
 	lsm := &LSM{cfg: cfg}
 	lsm.levels = lsm.initLevelManager(cfg)
 	lsm.memTable, lsm.imMemTable = lsm.recover()
+	// 初始化closer 用于资源回收的信号控制
+	lsm.closer = utils.NewCloser()
 	return lsm
 }
 
 func (l *LSM) Close() error {
+	// 等待全部合并过程的结束
+	// 等待全部api调用过程结束
+	l.closer.Close()
+	// TODO 需要加锁保证并发安全
+	if l.memTable != nil {
+		if err := l.memTable.Close(); err != nil {
+			return err
+		}
+	}
+	for i := range l.imMemTable {
+		if err := l.imMemTable[i].Close(); err != nil {
+			return err
+		}
+	}
+	if err := l.levels.close(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -88,6 +108,7 @@ func (l *LSM) Get(key []byte) (*utils.Entry, error) {
 func (l *LSM) StartCompaction() {
 	// 初始化lsm时会启动NumCompactors个协程，用来后台执行合并压缩
 	nums := l.cfg.NumCompactors
+	l.closer.Add(nums)
 	for i := 0; i < nums; i++ {
 		go l.levels.runCompacter(i)
 	}

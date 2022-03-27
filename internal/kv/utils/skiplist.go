@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	maxHeight       = 20
 	defaultMaxLevel = 48
 )
 
@@ -16,19 +17,21 @@ type SkipList struct {
 	lock       sync.RWMutex
 	headOffset uint32 //头结点在arena当中的偏移量
 	arena      *Arena
+	ref        int32
 }
 
 func NewSkipList(arenaSize int64) *SkipList {
 	// 初始化内存管理组件
 	arena := newArena(arenaSize)
 	// 初始化头节点
-	head := newElement(arena, nil, ValueStruct{}, defaultMaxLevel)
+	head := newElement(arena, nil, ValueStruct{}, maxHeight)
 	// 获取头节点的偏移量
 	ho := arena.getElementOffset(head)
 	return &SkipList{
 		arena:      arena,
 		currHeight: 1,
 		headOffset: ho,
+		ref:        1,
 	}
 }
 
@@ -69,9 +72,9 @@ func (s *SkipList) Add(data *Entry) error {
 			prevElements[i] = prev
 		}
 		// 找到比待插入key大的next节点，因此要在prev之后插入节点
-		topLast := prev.levels[i]
+		topLast := prev.tower[i]
 		// 向下跳，找到prev与last之间还有元素的level
-		for ; i >= 0 && prev.levels[i] == topLast; i-- {
+		for ; i >= 0 && prev.tower[i] == topLast; i-- {
 			prevElements[i] = prev
 		}
 	}
@@ -81,8 +84,8 @@ func (s *SkipList) Add(data *Entry) error {
 	off := s.arena.getElementOffset(ele)
 	for i := 0; i < level; i++ {
 		// 逐层单链表插入节点
-		ele.levels[i] = prevElements[i].levels[i]
-		prevElements[i].levels[i] = off
+		ele.tower[i] = prevElements[i].tower[i]
+		prevElements[i].tower[i] = off
 	}
 	return nil
 }
@@ -116,9 +119,9 @@ func (s *SkipList) Search(key []byte) *Entry {
 			prev = next
 		}
 		// 进入下一层
-		topLevel := prev.levels[i]
+		topLevel := prev.tower[i]
 
-		for i--; i >= 0 && prev.levels[i] == topLevel; i-- {
+		for i--; i >= 0 && prev.tower[i] == topLevel; i-- {
 
 		}
 	}
@@ -216,8 +219,7 @@ func decodeValue(value uint64) (valOffset uint32, valSize uint32) {
 }
 
 type Element struct {
-	levels [defaultMaxLevel]uint32
-	//levels    []*Element
+	tower     [maxHeight]uint32
 	entry     *Entry
 	keyOffset uint32
 	keySize   uint16

@@ -25,6 +25,7 @@ func (l *LSM) initLevelManager(cfg *Config) *LevelManager {
 		lsm: l,
 		cfg: cfg,
 	}
+	lm.compactStatus = l.newCompactStatus()
 	// 加载manifest文件
 	if err := lm.loadManifest(); err != nil {
 		panic(err)
@@ -87,7 +88,6 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	// 将所有entry加入到builder
 	iter := immutable.skipList.NewIterator()
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		// todo bug here not add entry
 		entry := iter.Item().Entry()
 		builder.add(entry, false)
 	}
@@ -153,4 +153,19 @@ func (h *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (in
 		return utils.CompareKeys(kr.right, h.tables[i].sst.MaxKey()) < 0
 	})
 	return left, right
+}
+
+func (l *LevelManager) close() error {
+	if err := l.cache.close(); err != nil {
+		return err
+	}
+	if err := l.manifestFile.Close(); err != nil {
+		return err
+	}
+	for i := range l.levels {
+		if err := l.levels[i].close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
