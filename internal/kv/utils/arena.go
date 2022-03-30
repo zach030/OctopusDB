@@ -3,18 +3,22 @@ package utils
 import (
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/pkg/errors"
+	"github.com/prometheus/common/log"
 )
 
 const (
-	NodeSize  = int(unsafe.Sizeof(Element{}))
+	NodeSize  = int(unsafe.Sizeof(node{}))
 	eachSize  = int(unsafe.Sizeof(uint32(0)))
 	nodeAlign = int(unsafe.Sizeof(uint64(0))) - 1
 )
 
 // Arena 内存管理模块，分配一整块内存buf，对应memetable，当此buf分配完时对应memtable-->immemtable的转换
 type Arena struct {
-	offset uint32
-	buf    []byte
+	offset     uint32
+	buf        []byte
+	shouldGrow bool
 }
 
 func newArena(n int64) *Arena {
@@ -27,6 +31,10 @@ func newArena(n int64) *Arena {
 // allocate 分配空间
 func (s *Arena) allocate(sz uint32) uint32 {
 	offset := atomic.AddUint32(&s.offset, sz)
+	if !s.shouldGrow {
+		AssertTrue(int(offset) <= len(s.buf))
+		return offset - sz
+	}
 	if len(s.buf)-int(offset) < NodeSize {
 		grow := uint32(len(s.buf))
 		if grow > 1<<30 {
@@ -46,7 +54,7 @@ func (s *Arena) allocate(sz uint32) uint32 {
 
 func (s *Arena) putNode(height int) uint32 {
 	// 分配32位无符号整数需要的空间
-	sz := (defaultMaxLevel - height) * eachSize
+	sz := (maxHeight - height) * eachSize
 	l := uint32(NodeSize - sz + nodeAlign)
 	n := s.allocate(l)
 	m := (n + uint32(nodeAlign)) & ^uint32(nodeAlign)
@@ -73,11 +81,11 @@ func (s *Arena) putVal(val ValueStruct) uint32 {
 }
 
 // getElement get element by given address
-func (s *Arena) getElement(offset uint32) *Element {
+func (s *Arena) getNode(offset uint32) *node {
 	if offset == 0 {
 		return nil
 	}
-	return (*Element)(unsafe.Pointer(&s.buf[offset]))
+	return (*node)(unsafe.Pointer(&s.buf[offset]))
 }
 
 func (s *Arena) getKey(offset uint32, size uint16) []byte {
@@ -92,17 +100,20 @@ func (s *Arena) getVal(offset uint32, size uint32) ValueStruct {
 }
 
 // getElementOffset 获取在arena中的偏移量
-func (s *Arena) getElementOffset(e *Element) uint32 {
+func (s *Arena) getNodeOffset(e *node) uint32 {
 	if e == nil {
 		return 0
 	}
 	return uint32(uintptr(unsafe.Pointer(e)) - uintptr(unsafe.Pointer(&s.buf[0])))
 }
 
-func (e *Element) getNextOffset(h int) uint32 {
-	return atomic.LoadUint32(&e.tower[h])
-}
-
 func (s *Arena) Size() int64 {
 	return int64(atomic.LoadUint32(&s.offset))
+}
+
+// AssertTrue asserts that b is true. Otherwise, it would log fatal.
+func AssertTrue(b bool) {
+	if !b {
+		log.Fatalf("%+v", errors.Errorf("Assert failed"))
+	}
 }

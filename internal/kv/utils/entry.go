@@ -10,6 +10,7 @@ type ValueStruct struct {
 	Meta      byte
 	Value     []byte
 	ExpiresAt uint64
+	Version   uint64
 }
 
 // EncodedSize value只持久化具体的value值和过期时间
