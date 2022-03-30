@@ -2,7 +2,6 @@ package lsm
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"sort"
@@ -11,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/common/log"
 	"github.com/zach030/OctopusDB/internal/kv/pb"
 
 	"github.com/pkg/errors"
@@ -85,6 +85,7 @@ func (l *LevelManager) runCompacter(id int) {
 
 // runOnce 执行一次压缩任务
 func (l *LevelManager) runOnce(id int) bool {
+	log.Info("[Compact] compactor id:", id, " is running")
 	// 生成本次压缩的任务,一组压缩比超过1的任务
 	prios := l.pickCompactLevels()
 	if id == 0 {
@@ -113,7 +114,7 @@ func (l *LevelManager) run(id int, p compactionPriority) bool {
 	case utils.ErrFillTables:
 		// 什么也不做，此时合并过程被忽略
 	default:
-		log.Printf("[taskID:%d] While running doCompact: %v\n ", id, err)
+		log.Infof("[taskID:%d] While running doCompact: %v\n ", id, err)
 	}
 	return false
 }
@@ -157,11 +158,11 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 	// 执行合并计划
 	if err := l.runCompactDef(id, level, cd); err != nil {
 		// This compaction couldn't be done successfully.
-		log.Printf("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
+		log.Infof("[Compactor: %d] LOG Compact FAILED with error: %+v: %+v", id, err, cd)
 		return err
 	}
 
-	log.Printf("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.levelNum)
+	log.Infof("[Compactor: %d] Compaction for level: %d DONE", id, cd.thisLevel.levelNum)
 	return nil
 }
 
@@ -534,7 +535,7 @@ func (l *LevelManager) fillTablesL0ToLbase(cd *compactDef) bool {
 		panic("next level not be 0")
 	}
 	if cd.p.adjusted > 0.0 && cd.p.adjusted < 1.0 {
-		log.Printf("no need to do compact ,adjusted is between 0-1")
+		log.Infof("no need to do compact ,adjusted is between 0-1")
 		return false
 	}
 	cd.lockLevels()

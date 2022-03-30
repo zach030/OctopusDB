@@ -294,6 +294,7 @@ func (tb *tableBuilder) finishBlock() {
 
 // Copy 将bd中所有数据序列化到dst中
 func (bd *buildData) Copy(dst []byte) int {
+	// todo 这里和initSSt的时候，idxStart有冲突
 	var written int
 	// 1. copy block data
 	for _, bl := range bd.blockList {

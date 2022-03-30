@@ -70,14 +70,21 @@ func (m *MemTable) Set(entry *utils.Entry) error {
 		return err
 	}
 	// 再写内存跳表
-	if err := m.skipList.Add(entry); err != nil {
-		return err
-	}
+	m.skipList.Add(entry)
 	return nil
 }
 
 func (m *MemTable) Get(key []byte) *utils.Entry {
-	return m.skipList.Search(key)
+	vs := m.skipList.Search(key)
+
+	e := &utils.Entry{
+		Key:       key,
+		Value:     vs.Value,
+		ExpiresAt: vs.ExpiresAt,
+		Meta:      vs.Meta,
+		Version:   vs.Version,
+	}
+	return e
 }
 
 // refreshSkipList read and iterate wal file, fetch entry and add to skiplist
@@ -96,9 +103,6 @@ func (m *MemTable) Close() error {
 	if err := m.wal.Close(); err != nil {
 		return err
 	}
-	if err := m.skipList.Close(); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -107,7 +111,8 @@ func (m *MemTable) replayFunction(opt *Config) func(*utils.Entry, *utils.ValuePt
 		if ts := utils.ParseTimeStamp(e.Key); ts > m.maxVersion {
 			m.maxVersion = ts
 		}
-		return m.skipList.Add(e)
+		m.skipList.Add(e)
+		return nil
 	}
 }
 

@@ -4,11 +4,11 @@ import "errors"
 
 var (
 	ErrChecksumMismatch = errors.New("checksum mismatch")
-
-	ErrTruncate    = errors.New("Do truncate")
-	ErrKeyNotExist = errors.New("key not exist")
-
-	ErrStop = errors.New("Stop")
+	ErrEmptyKey         = errors.New("Key cannot be empty")
+	ErrTruncate         = errors.New("Do truncate")
+	ErrKeyNotExist      = errors.New("key not exist")
+	ErrKeyNotFound      = errors.New("Key not found")
+	ErrStop             = errors.New("Stop")
 
 	// compact
 	ErrFillTables = errors.New("Unable to fill tables")

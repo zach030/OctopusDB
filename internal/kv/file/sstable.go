@@ -50,9 +50,12 @@ func (s *SSTable) Init() error {
 	stat, _ := s.mf.Fd.Stat()
 	statType := stat.Sys().(*syscall.Stat_t)
 	s.createdAt = time.Unix(statType.Ctimespec.Sec, statType.Ctimespec.Nsec)
-	s.minKey = blockMeta.GetKey()
-	blocks := len(s.tableIdx.GetOffsets())
-	s.maxKey = s.tableIdx.GetOffsets()[blocks-1].Key
+	// init min key
+	keyBytes := blockMeta.GetKey()
+	minKey := make([]byte, len(keyBytes))
+	copy(minKey, keyBytes)
+	s.minKey = minKey
+	s.maxKey = minKey
 	return nil
 }
 

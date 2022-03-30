@@ -1,6 +1,9 @@
 package kv
 
 import (
+	"math"
+	"time"
+
 	"github.com/zach030/OctopusDB/internal/kv/lsm"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 	"github.com/zach030/OctopusDB/internal/kv/vlog"
@@ -41,13 +44,16 @@ func Open(opt *Options) *OctopusDB {
 	})
 	db.stat = newStat()
 	db.vlog = vlog.NewVLog(&vlog.VLogOption{})
-	// db.lsm.StartCompaction()
+	go db.lsm.StartCompaction()
 	go db.vlog.StartGC()
 	go db.stat.StartStat()
 	return db
 }
 
 func (o *OctopusDB) Set(data *utils.Entry) error {
+	if data == nil || len(data.Key) == 0 {
+		return utils.ErrEmptyKey
+	}
 	// 1. 判断value大小
 	var valuePtr *utils.ValuePtr
 	if utils.ValueSize(data.Value) > o.opt.ValueThreshold {
@@ -57,6 +63,7 @@ func (o *OctopusDB) Set(data *utils.Entry) error {
 			return err
 		}
 	}
+	data.Key = utils.KeyWithTs(data.Key, math.MaxUint32)
 	if valuePtr != nil {
 		data.Value = utils.ValuePtrCodec(valuePtr)
 	}
@@ -65,12 +72,16 @@ func (o *OctopusDB) Set(data *utils.Entry) error {
 }
 
 func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
+	if len(key) == 0 {
+		return nil, utils.ErrEmptyKey
+	}
 	var (
 		entry *utils.Entry
 		err   error
 	)
 	// 1. 先从lsm拿key
 	// 2. 如果存了vlog，再取value
+	key = utils.KeyWithTs(key, math.MaxUint32)
 	if entry, err = o.lsm.Get(key); err == nil {
 		return entry, nil
 	}
@@ -80,7 +91,22 @@ func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
 			return entry, nil
 		}
 	}
+	if isDeletedOrExpired(entry) {
+		return nil, utils.ErrKeyNotFound
+	}
 	return entry, nil
+}
+
+// 判断是否过期 是可删除
+func isDeletedOrExpired(e *utils.Entry) bool {
+	if e.Value == nil {
+		return true
+	}
+	if e.ExpiresAt == 0 {
+		return false
+	}
+
+	return e.ExpiresAt <= uint64(time.Now().Unix())
 }
 
 func (o *OctopusDB) Del(key []byte) error {

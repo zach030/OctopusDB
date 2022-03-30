@@ -86,7 +86,7 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	// 构建table-builder
 	builder := newTableBuilder(l.cfg)
 	// 将所有entry加入到builder
-	iter := immutable.skipList.NewIterator()
+	iter := immutable.skipList.NewSkipListIterator()
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		entry := iter.Item().Entry()
 		builder.add(entry, false)

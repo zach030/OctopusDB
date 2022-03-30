@@ -278,7 +278,7 @@ func (b *blockIterator) setIdx(idx int) {
 	}
 	b.prevOverlap = h.overlap
 	valueOffset := headerSize + h.diff
-	diffKey := b.data[headerSize:valueOffset]
+	diffKey := entryData[headerSize:valueOffset]
 	b.key = append(b.key[:h.overlap], diffKey...)
 
 	entry := utils.NewEntry(b.key, nil)

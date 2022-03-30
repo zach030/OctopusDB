@@ -3,6 +3,7 @@ package lsm
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -62,7 +63,7 @@ type memIterator struct {
 }
 
 func (m *MemTable) NewIterator(opt *utils.Options) utils.Iterator {
-	return &memIterator{innerIter: m.skipList.NewIterator()}
+	return &memIterator{innerIter: m.skipList.NewSkipListIterator()}
 }
 
 func (iter *memIterator) Next() {
@@ -136,27 +137,80 @@ func NewConcatIterator(tbls []*table, opt *utils.Options) *ConcatIterator {
 }
 
 func (s *ConcatIterator) Next() {
-	panic("implement me")
+	s.cur.Next()
+	if s.cur.Valid() {
+		// Nothing to do. Just stay with the current table.
+		return
+	}
+	for { // In case there are empty tables.
+		if !s.options.IsAsc {
+			s.setIdx(s.idx + 1)
+		} else {
+			s.setIdx(s.idx - 1)
+		}
+		if s.cur == nil {
+			// End of list. Valid will become false.
+			return
+		}
+		s.cur.Rewind()
+		if s.cur.Valid() {
+			break
+		}
+	}
 }
 
 func (s *ConcatIterator) Rewind() {
-	panic("implement me")
+	if len(s.iters) == 0 {
+		return
+	}
+	if !s.options.IsAsc {
+		s.setIdx(0)
+	} else {
+		s.setIdx(len(s.iters) - 1)
+	}
+	s.cur.Rewind()
 }
 
 func (s *ConcatIterator) Valid() bool {
-	panic("implement me")
+	return s.cur != nil && s.cur.Valid()
 }
 
 func (s *ConcatIterator) Close() error {
-	panic("implement me")
+	for _, it := range s.iters {
+		if it == nil {
+			continue
+		}
+		if err := it.Close(); err != nil {
+			return fmt.Errorf("ConcatIterator:%+v", err)
+		}
+	}
+	return nil
 }
 
-func (s *ConcatIterator) Seek(bytes []byte) {
-	panic("implement me")
+func (s *ConcatIterator) Seek(key []byte) {
+	var idx int
+	if s.options.IsAsc {
+		idx = sort.Search(len(s.tables), func(i int) bool {
+			return utils.CompareKeys(s.tables[i].sst.MaxKey(), key) >= 0
+		})
+	} else {
+		n := len(s.tables)
+		idx = n - 1 - sort.Search(n, func(i int) bool {
+			return utils.CompareKeys(s.tables[n-1-i].sst.MinKey(), key) <= 0
+		})
+	}
+	if idx >= len(s.tables) || idx < 0 {
+		s.setIdx(-1)
+		return
+	}
+	// For reversed=false, we know s.tables[i-1].Biggest() < key. Thus, the
+	// previous table cannot possibly contain key.
+	s.setIdx(idx)
+	s.cur.Seek(key)
 }
 
 func (s *ConcatIterator) Item() utils.Item {
-	panic("implement me")
+	return s.cur.Item()
 }
 
 func (s *ConcatIterator) setIdx(idx int) {

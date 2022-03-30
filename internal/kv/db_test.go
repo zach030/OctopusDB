@@ -50,43 +50,49 @@ func newRandEntry(sz int) *utils.Entry {
 }
 
 func TestAPI(t *testing.T) {
-	clearDir()
+	// clearDir()
 	db := Open(opt)
 	defer func() { _ = db.Close() }()
 	// 写入
-	for i := 0; i < 50; i++ {
-		key, val := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
-		e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
-		if err := db.Set(e); err != nil {
-			t.Fatal(err)
+	t.Run("add", func(t *testing.T) {
+		for i := 0; i < 5000; i++ {
+			key, val := fmt.Sprintf("key%d%v", i, time.Now().UnixNano()), fmt.Sprintf("val%d", i)
+			e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
+			if err := db.Set(e); err != nil {
+				t.Fatal(err)
+			}
+			// 查询
+			//if _, err := db.Get([]byte(key)); err != nil {
+			//	t.Fatal(err)
+			//}
+			//else {
+			//	t.Logf("db.Get key=%s, value=%s, expiresAt=%d", entry.Key, entry.Value, entry.ExpiresAt)
+			//}
 		}
-		// 查询
-		if entry, err := db.Get([]byte(key)); err != nil {
-			t.Fatal(err)
-		} else {
-			t.Logf("db.Get key=%s, value=%s, expiresAt=%d", entry.Key, entry.Value, entry.ExpiresAt)
-		}
-	}
+	})
 
-	for i := 0; i < 40; i++ {
-		key, _ := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
-		if err := db.Del([]byte(key)); err != nil {
-			t.Fatal(err)
+	t.Run("delete", func(t *testing.T) {
+		for i := 0; i < 40; i++ {
+			key, _ := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
+			if err := db.Del([]byte(key)); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
+	})
 
-	for i := 0; i < 10; i++ {
-		key, val := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
-		e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
-		if err := db.Set(e); err != nil {
-			t.Fatal(err)
+	t.Run("search", func(t *testing.T) {
+		for i := 0; i < 10; i++ {
+			key, val := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
+			e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
+			if err := db.Set(e); err != nil {
+				t.Fatal(err)
+			}
+			// 查询
+			if entry, err := db.Get([]byte(key)); err != nil {
+				t.Fatal(err)
+			} else {
+				t.Logf("db.Get key=%s, value=%s, expiresAt=%d", entry.Key, entry.Value, entry.ExpiresAt)
+			}
 		}
-		// 查询
-		if entry, err := db.Get([]byte(key)); err != nil {
-			t.Fatal(err)
-		} else {
-			t.Logf("db.Get key=%s, value=%s, expiresAt=%d", entry.Key, entry.Value, entry.ExpiresAt)
-		}
-	}
-
+	})
 }

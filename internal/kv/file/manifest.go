@@ -255,8 +255,8 @@ func (m *Manifest) applyModifies(modifies pb.ManifestModifies) error {
 func (m *Manifest) applyModify(modify *pb.ManifestModify) error {
 	switch modify.Op {
 	case pb.ManifestModify_CREATE:
-		if _, ok := m.Tables[modify.Id]; !ok {
-			return errors.Errorf("not found new table")
+		if _, ok := m.Tables[modify.Id]; ok {
+			return fmt.Errorf("MANIFEST invalid, table %d exists", modify.Id)
 		}
 		m.Tables[modify.Id] = TableManifest{
 			Level:    uint8(modify.Level),
