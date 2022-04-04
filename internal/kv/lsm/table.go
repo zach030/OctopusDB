@@ -46,6 +46,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 	} else {
 		t = &table{manager: manager, fid: fid}
 		t.sst = file.OpenSSTable(&file.Option{
+			FID:      fid,
 			FileName: sstName,
 			Dir:      manager.cfg.WorkDir,
 			Flag:     os.O_CREATE | os.O_RDWR,

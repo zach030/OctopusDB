@@ -313,6 +313,18 @@ func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, fun
 // 真正执行并行压缩的子压缩文件
 func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef, inflightBuilders *utils.Throttle, res chan<- *table) {
 	var lastKey []byte
+	// 更新 discardStats
+	//discardStats := make(map[uint32]int64)
+	//defer func() {
+	//	l.updateDiscardStats(discardStats)
+	//}()
+	//updateStats := func(e *utils.Entry) {
+	//	if e.Meta&utils.BitValuePointer > 0 {
+	//		var vp utils.ValuePtr
+	//		vp.Decode(e.Value)
+	//		discardStats[vp.Fid] += int64(vp.Len)
+	//	}
+	//}
 	addKeys := func(builder *tableBuilder) {
 		var tableKr keyRange
 		for ; it.Valid(); it.Next() {
@@ -342,6 +354,7 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 			// 判断是否是过期内容，是的话就删除
 			switch {
 			case isExpired:
+				// updateStats(it.Item().Entry())
 				builder.AddStaleKey(it.Item().Entry())
 			default:
 				builder.AddKey(it.Item().Entry())
@@ -372,6 +385,7 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 		// called Add() at least once, and builder is not Empty().
 		if builder.empty() {
 			// Cleanup builder resources:
+			log.Info("builder for level:", cd.nextLevel, " will finish")
 			builder.finish()
 			builder.Close()
 			continue

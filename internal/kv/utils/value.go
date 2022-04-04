@@ -36,6 +36,10 @@ func U32SliceToBytes(u32s []uint32) []byte {
 	return b
 }
 
+func BytesToU32(buf []byte) uint32 {
+	return binary.BigEndian.Uint32(buf)
+}
+
 // U32ToBytes converts the given Uint32 to bytes
 func U32ToBytes(v uint32) []byte {
 	var uBuf [4]byte

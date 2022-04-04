@@ -1,7 +1,6 @@
 package file
 
 import (
-	"encoding/binary"
 	"io"
 	"os"
 	"syscall"
@@ -74,6 +73,7 @@ func (s *SSTable) read(offset, size int) ([]byte, error) {
 }
 
 func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
+	log.Info("init sst table for:", s.fid)
 	off := len(s.mf.Data)
 	// last 4 bit : checksum_len
 	off -= 4
@@ -81,7 +81,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	checksumLen := int(binary.BigEndian.Uint32(buf))
+	checksumLen := int(utils.BytesToU32(buf))
 	if checksumLen < 0 {
 		return nil, errors.New("checksum length less zero")
 	}
@@ -97,7 +97,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.idxLen = int(binary.BigEndian.Uint32(buf))
+	s.idxLen = int(utils.BytesToU32(buf))
 	// read index
 	off -= s.idxLen
 	s.idxStart = off

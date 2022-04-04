@@ -50,7 +50,7 @@ func newRandEntry(sz int) *utils.Entry {
 }
 
 func TestAPI(t *testing.T) {
-	// clearDir()
+	clearDir()
 	db := Open(opt)
 	defer func() { _ = db.Close() }()
 	// 写入

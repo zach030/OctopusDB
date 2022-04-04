@@ -5,6 +5,8 @@ import (
 	"os"
 	"unsafe"
 
+	"github.com/prometheus/common/log"
+
 	"github.com/zach030/OctopusDB/internal/kv/file"
 
 	"github.com/zach030/OctopusDB/internal/kv/pb"
@@ -105,6 +107,7 @@ func (tb *tableBuilder) finish() []byte {
 	bd := tb.done()
 	buf := make([]byte, bd.size)
 	written := bd.Copy(buf)
+	log.Infof("finish for table, size is:", written)
 	if written == len(buf) {
 		panic("written == len(buf)")
 	}
@@ -173,10 +176,13 @@ func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 	val.EncodeValue(dst)
 }
 
+// flush 一个table写完，构造build-data，通过mmap映射到sst文件，存于table下返回
 func (tb *tableBuilder) flush(lm *LevelManager, tableName string) (tbl *table, err error) {
+	log.Info("[Table builder] flush table :", tableName)
 	bd := tb.done()
 	tbl = &table{manager: lm, fid: utils.FID(tableName)}
 	tbl.sst = file.OpenSSTable(&file.Option{
+		FID:      utils.FID(tableName),
 		FileName: tableName,
 		Dir:      lm.cfg.WorkDir,
 		Flag:     os.O_CREATE | os.O_RDWR,
@@ -224,6 +230,9 @@ func (tb *tableBuilder) allocate(need int) []byte {
 		b.data = tmp
 	}
 	b.end += need
+	if need == 4 && b.end == 1128 {
+		log.Infof("allocate buf for table index len now,offset is:1128")
+	}
 	return b.data[b.end-need : b.end]
 }
 
@@ -279,6 +288,7 @@ func (tb *tableBuilder) finishBlock() {
 	// | entry1-offset | entry2-offset | ...... | length of entryOffsets | checksum | length of checksum |
 	// block encode
 	tb.append(utils.U32SliceToBytes(tb.curBlock.entryOffsets))
+	log.Infof("builder collect data for length of entries now, content is:%v", utils.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
 	tb.append(utils.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
 	checksum := tb.calculateChecksum(tb.curBlock.data[:tb.curBlock.end])
 	// Append the block checksum and its length.
