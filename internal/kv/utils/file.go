@@ -112,3 +112,7 @@ func SyncDir(dir string) error {
 	}
 	return errors.Wrapf(closeErr, "While closing directory: %s.", dir)
 }
+
+func VlogFilePath(dirPath string, fid uint32) string {
+	return fmt.Sprintf("%s%s%05d.vlog", dirPath, string(os.PathSeparator), fid)
+}

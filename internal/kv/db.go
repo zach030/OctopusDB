@@ -6,7 +6,6 @@ import (
 
 	"github.com/zach030/OctopusDB/internal/kv/lsm"
 	"github.com/zach030/OctopusDB/internal/kv/utils"
-	"github.com/zach030/OctopusDB/internal/kv/vlog"
 )
 
 type API interface {
@@ -19,15 +18,17 @@ type API interface {
 }
 
 type OctopusDB struct {
-	lsm  *lsm.LSM
-	vlog *vlog.VLog
-	opt  *Options
-	stat *stat
+	lsm   *lsm.LSM
+	vlog  *valueLog
+	opt   *Options
+	stat  *stat
+	vhead *utils.ValuePtr // vlog同步数据截断点
 }
 
 func Open(opt *Options) *OctopusDB {
 	db := &OctopusDB{opt: opt}
 	// todo 目录锁
+	db.InitVlog()
 	db.lsm = lsm.NewLSM(&lsm.Config{
 		WorkDir:             opt.WorkDir,
 		MemTableSize:        opt.MemTableSize,
@@ -43,9 +44,8 @@ func Open(opt *Options) *OctopusDB {
 		NumCompactors:       3,
 	})
 	db.stat = newStat()
-	db.vlog = vlog.NewVLog(&vlog.VLogOption{})
 	go db.lsm.StartCompaction()
-	go db.vlog.StartGC()
+	// go db.vlog.StartGC()
 	go db.stat.StartStat()
 	return db
 }
@@ -59,9 +59,9 @@ func (o *OctopusDB) Set(data *utils.Entry) error {
 	if utils.ValueSize(data.Value) > o.opt.ValueThreshold {
 		// 2. 如果大value，写入vlog
 		valuePtr = utils.NewValuePtr(data)
-		if err := o.vlog.Set(data); err != nil {
-			return err
-		}
+		//if err := o.vlog.Set(data); err != nil {
+		//	return err
+		//}
 	}
 	data.Key = utils.KeyWithTs(data.Key, math.MaxUint32)
 	if valuePtr != nil {
@@ -87,9 +87,9 @@ func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
 	}
 	// 3. 判断是否存vlog
 	if entry != nil && utils.IsValuePtr(entry) {
-		if entry, err = o.vlog.Get(entry); err == nil {
-			return entry, nil
-		}
+		//if entry, err = o.vlog.Get(entry); err == nil {
+		//	return entry, nil
+		//}
 	}
 	if isDeletedOrExpired(entry) {
 		return nil, utils.ErrKeyNotFound
@@ -129,11 +129,19 @@ func (o *OctopusDB) Close() error {
 	if err := o.lsm.Close(); err != nil {
 		return err
 	}
-	if err := o.vlog.Close(); err != nil {
-		return err
-	}
+	//if err := o.vlog.Close(); err != nil {
+	//	return err
+	//}
 	if err := o.stat.Close(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (o *OctopusDB) shouldWriteValueToLSM(e *utils.Entry) bool {
+	return int64(len(e.Value)) < o.opt.ValueThreshold
+}
+
+func (o *OctopusDB) sendToWriteCh(entries []*utils.Entry) (*request, error) {
+	return nil, nil
 }

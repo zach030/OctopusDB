@@ -9,7 +9,7 @@ var (
 	ErrKeyNotExist      = errors.New("key not exist")
 	ErrKeyNotFound      = errors.New("Key not found")
 	ErrStop             = errors.New("Stop")
-
+	ErrDeleteVlogFile   = errors.New("Delete vlog file")
 	// compact
 	ErrFillTables = errors.New("Unable to fill tables")
 )
