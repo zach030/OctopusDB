@@ -63,6 +63,7 @@ func (cd *compactDef) unlockLevels() {
 }
 
 func (l *LevelManager) runCompacter(id int) {
+	defer l.lsm.closer.Done()
 	randomDelay := time.NewTimer(time.Duration(rand.Intn(1000)) * time.Millisecond)
 	select {
 	case <-randomDelay.C:

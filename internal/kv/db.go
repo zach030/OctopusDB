@@ -18,11 +18,12 @@ type API interface {
 }
 
 type OctopusDB struct {
-	lsm   *lsm.LSM
-	vlog  *valueLog
-	opt   *Options
-	stat  *stat
-	vhead *utils.ValuePtr // vlog同步数据截断点
+	lsm        *lsm.LSM
+	vlog       *valueLog
+	opt        *Options
+	stat       *stat
+	vhead      *utils.ValuePtr // vlog同步数据截断点
+	logRotates int32
 }
 
 func Open(opt *Options) *OctopusDB {
@@ -126,15 +127,16 @@ func (o *OctopusDB) Info() *stat {
 }
 
 func (o *OctopusDB) Close() error {
+	o.vlog.lfDiscardStats.closer.Close()
 	if err := o.lsm.Close(); err != nil {
 		return err
 	}
-	//if err := o.vlog.Close(); err != nil {
-	//	return err
-	//}
-	if err := o.stat.Close(); err != nil {
+	if err := o.vlog.close(); err != nil {
 		return err
 	}
+	//if err := o.stats.close(); err != nil {
+	//	return err
+	//}
 	return nil
 }
 

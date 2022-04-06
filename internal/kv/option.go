@@ -4,13 +4,14 @@ import "github.com/zach030/OctopusDB/internal/kv/utils"
 
 // Options corekv 总的配置文件
 type Options struct {
-	ValueThreshold   int64
-	WorkDir          string
-	MemTableSize     int64
-	SSTableMaxSz     int64
-	ValueLogFileSize int
-	MaxBatchCount    int64
-	MaxBatchSize     int64
+	ValueThreshold     int64
+	WorkDir            string
+	MemTableSize       int64
+	SSTableMaxSz       int64
+	ValueLogFileSize   int
+	MaxBatchCount      int64
+	MaxBatchSize       int64
+	ValueLogMaxEntries uint32
 }
 
 // NewDefaultOptions 返回默认的options

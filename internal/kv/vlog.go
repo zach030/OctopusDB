@@ -1,8 +1,10 @@
 package kv
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"os"
@@ -71,6 +73,7 @@ func (vlog *valueLog) newValuePtr(e *utils.Entry) (*utils.ValuePtr, error) {
 func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 	vlog.lfDiscardStats.closer.Add(1)
 	go vlog.flushDiscardStats()
+	// 统计所有vlog文件
 	if err := vlog.populateFilesMap(); err != nil {
 		return err
 	}
@@ -105,7 +108,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 		if fid == ptr.Fid {
 			offset = ptr.Offset + ptr.Len
 		}
-		fmt.Printf("Replaying file id: %d at offset: %d\n", fid, offset)
+		log.Infof("Replaying file id: %d at offset: %d\n", fid, offset)
 		now := time.Now()
 		// 对此vlog文件进行重放日志
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
@@ -124,7 +127,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 			}
 			return err
 		}
-		fmt.Printf("Replay took: %s\n", time.Since(now))
+		log.Infof("Replay took: %s\n", time.Since(now))
 
 		if fid < vlog.maxFid {
 			// This file has been replayed. It can now be mmapped.
@@ -149,7 +152,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 	// head的设计起到check point的作用
 	vlog.db.vhead = &utils.ValuePtr{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 	if err := vlog.populateDiscardStats(); err != nil {
-		fmt.Errorf("Failed to populate discard stats: %s\n", err)
+		log.Error(fmt.Errorf("Failed to populate discard stats: %s\n", err))
 	}
 	return nil
 }
@@ -157,12 +160,10 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 // populateFilesMap 填充文件目录下的所有vlog文件
 func (vlog *valueLog) populateFilesMap() error {
 	vlog.filesMap = make(map[uint32]*file.LogFile)
-
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, fmt.Sprintf("Unable to open log dir. path[%s]", vlog.dirPath))
 	}
-
 	found := make(map[uint64]struct{})
 	for _, f := range files {
 		if !strings.HasSuffix(f.Name(), ".vlog") {
@@ -237,6 +238,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*file.LogFile, error) {
 // sortedFids 对vlog文件按照文件名大小进行排序，排除正在处于gc状态的文件
 func (vlog *valueLog) sortedFids() []uint32 {
 	toDel := make(map[uint32]struct{})
+	// 排除处于gc状态的vlog文件
 	for _, u := range vlog.filesToBeDeleted {
 		toDel[u] = struct{}{}
 	}
@@ -278,15 +280,182 @@ func (vlog *valueLog) replayLog(lf *file.LogFile, offset uint32, replayFn utils.
 		return lf.Bootstrap()
 	}
 
-	fmt.Printf("Truncating vlog file %s to offset: %d\n", lf.FileName(), endOffset)
+	log.Infof("Truncating vlog file %s to offset: %d\n", lf.FileName(), endOffset)
 	if err := lf.Truncate(int64(endOffset)); err != nil {
 		return errors.Wrapf(err, fmt.Sprintf("Truncation needed at offset %d. Can be done manually as well.", endOffset))
 	}
 	return nil
 }
 
+// readValueBytes return vlog entry slice and read locked log file. Caller should take care of
+// logFile unlocking.
+func (vlog *valueLog) readValueBytes(vp *utils.ValuePtr) ([]byte, *file.LogFile, error) {
+	// 根据值指针读vlog，首先根据id选出所在的vlog
+	lf, err := vlog.getVLogFile(vp)
+	if err != nil {
+		log.Error(err)
+		return nil, nil, err
+	}
+	// 使用vlog底层根据offset，len读取data
+	buf, err := lf.Read(vp)
+	if err != nil {
+		log.Error(err)
+		return nil, nil, err
+	}
+	return buf, lf, nil
+}
+
+func (vlog *valueLog) getVLogFile(vp *utils.ValuePtr) (*file.LogFile, error) {
+	vlog.filesLock.RLock()
+	defer vlog.filesLock.RUnlock()
+	lf, ok := vlog.filesMap[vp.Fid]
+	if !ok {
+		return nil, fmt.Errorf("value-log with id:%v is not found", vp.Fid)
+	}
+	// 校验是否超出vlog可读范围
+	maxLf := vlog.maxFid
+	if vp.Fid == maxLf {
+		if vp.Offset >= vlog.woffset() {
+			return nil, errors.Errorf(
+				"Invalid value pointer offset: %d greater than current offset: %d",
+				vp.Offset, vlog.woffset())
+		}
+	}
+	lf.Lock.RLock()
+	return lf, nil
+}
+
+// getUnlockCallback will returns a function which unlock the logfile if the logfile is mmaped.
+// otherwise, it unlock the logfile and return nil.
+func (vlog *valueLog) getUnlockCallback(lf *file.LogFile) func() {
+	if lf == nil {
+		return nil
+	}
+	return lf.Lock.RUnlock
+}
+
 func (vlog *valueLog) write(reqs []*request) error {
+	if err := vlog.validateWrites(reqs); err != nil {
+		return err
+	}
+	vlog.filesLock.RLock()
+	currLogFile := vlog.filesMap[vlog.maxFid]
+	vlog.filesLock.RUnlock()
+	var buf bytes.Buffer
+
+	flushWrites := func() error {
+		if buf.Len() == 0 {
+			return nil
+		}
+		data := buf.Bytes()
+		offset := vlog.woffset()
+		if err := currLogFile.Write(offset, data); err != nil {
+			return errors.Wrapf(err, "Unable to write to value log file: %q", currLogFile.FileName())
+		}
+		buf.Reset()
+		atomic.AddUint32(&vlog.writableLogOffset, uint32(len(data)))
+		currLogFile.AddSize(vlog.writableLogOffset)
+		return nil
+	}
+	toDisk := func() error {
+		if err := flushWrites(); err != nil {
+			return err
+		}
+		// 切分vlog文件
+		if vlog.woffset() > uint32(vlog.opt.ValueLogFileSize) || vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries {
+			if err := currLogFile.DoneWriting(vlog.woffset()); err != nil {
+				return err
+			}
+
+			newid := atomic.AddUint32(&vlog.maxFid, 1)
+			if newid <= 0 {
+				panic(fmt.Errorf("newid has overflown uint32: %v", newid))
+			}
+			// 创建新的vlog文件
+			newlf, err := vlog.createVlogFile(newid)
+			if err != nil {
+				return err
+			}
+			currLogFile = newlf
+			atomic.AddInt32(&vlog.db.logRotates, 1)
+		}
+		return nil
+	}
+
+	for i := range reqs {
+		b := reqs[i]
+		b.Ptrs = b.Ptrs[0:]
+		nums := 0
+		for j := range b.Entries {
+			en := b.Entries[j]
+			if vlog.db.shouldWriteValueToLSM(en) {
+				b.Ptrs = append(b.Ptrs, &utils.ValuePtr{})
+				continue
+			}
+			var p utils.ValuePtr
+			p.Fid = currLogFile.FID
+			p.Offset = vlog.woffset() + uint32(buf.Len())
+			plen, err := currLogFile.EncodeEntry(en, &buf, p.Offset)
+			if err != nil {
+				log.Error(err)
+				return err
+			}
+			p.Len = uint32(plen)
+			b.Ptrs = append(b.Ptrs, &p)
+			nums++
+			if buf.Len() > vlog.db.opt.ValueLogFileSize {
+				if err := flushWrites(); err != nil {
+					return err
+				}
+			}
+		}
+		vlog.numEntriesWritten = uint32(nums)
+		// We write to disk here so that all entries that are part of the same transaction are
+		// written to the same vlog file.
+		writeNow := vlog.woffset()+uint32(buf.Len()) > uint32(vlog.opt.ValueLogFileSize) ||
+			vlog.numEntriesWritten > vlog.opt.ValueLogMaxEntries
+		if writeNow {
+			if err := toDisk(); err != nil {
+				return err
+			}
+		}
+	}
+	return toDisk()
+}
+
+// validateWrites 检查当前request内的entry能否写入vlog文件
+func (vlog *valueLog) validateWrites(reqs []*request) error {
+	currOffset := uint64(vlog.woffset())
+	for _, req := range reqs {
+		size := estimateRequestSize(req)
+		aboutSize := currOffset + size
+		if aboutSize > uint64(utils.MaxVlogFileSize) {
+			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
+				aboutSize, utils.MaxVlogFileSize)
+		}
+		if aboutSize >= uint64(vlog.opt.ValueLogFileSize) {
+			// We'll create a new vlog file if the estimated offset is greater or equal to
+			// max vlog size. So, resetting the vlogOffset.
+			currOffset = 0
+			continue
+		}
+		// Estimated vlog offset will become current vlog offset if the vlog is not rotated.
+		currOffset = aboutSize
+	}
 	return nil
+}
+
+// estimateRequestSize returns the size that needed to be written for the given request.
+func estimateRequestSize(req *request) uint64 {
+	size := uint64(0)
+	for _, e := range req.Entries {
+		size += uint64(utils.MaxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+	}
+	return size
+}
+
+func (vlog *valueLog) woffset() uint32 {
+	return atomic.LoadUint32(&vlog.writableLogOffset)
 }
 
 // 请求池
@@ -355,7 +524,7 @@ func (o *OctopusDB) InitVlog() {
 	o.vlog = vlog
 }
 
-// getHead prints all the head pointer in the DB and return the max value.
+// getHead checkpoint of all value-log
 func (o *OctopusDB) getHead() (*utils.ValuePtr, uint64) {
 	var vptr utils.ValuePtr
 	return &vptr, 0
@@ -363,6 +532,7 @@ func (o *OctopusDB) getHead() (*utils.ValuePtr, uint64) {
 
 // replayFunction 重放vlog中的entry 保证lsm与vlog数据的一致性
 func (o *OctopusDB) replayFunction() func(*utils.Entry, *utils.ValuePtr) error {
+	// 将entry写入lsm
 	toLSM := func(k []byte, vs utils.ValueStruct) {
 		o.lsm.Set(&utils.Entry{
 			Key:       k,
@@ -514,4 +684,31 @@ func (vlog *valueLog) populateDiscardStats() error {
 	//fmt.Printf("Value Log Discard stats: %v\n", statsMap)
 	//vlog.lfDiscardStats.flushChan <- statsMap
 	return nil
+}
+
+func (vlog *valueLog) close() error {
+	if vlog == nil || vlog.db == nil {
+		return nil
+	}
+	// close flushDiscardStats.
+	<-vlog.lfDiscardStats.closer.CloseSignal
+	var err error
+	for id, f := range vlog.filesMap {
+		f.Lock.Lock() // We won’t release the lock.
+		maxFid := vlog.maxFid
+		// TODO(ibrahim) - Do we need the following truncations on non-windows
+		// platforms? We expand the file only on windows and the vlog.woffset()
+		// should point to end of file on all other platforms.
+		if id == maxFid {
+			// truncate writable log file to correct offset.
+			if truncErr := f.Truncate(int64(vlog.woffset())); truncErr != nil && err == nil {
+				err = truncErr
+			}
+		}
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		f.Lock.Unlock()
+	}
+	return err
 }
