@@ -83,8 +83,8 @@ func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
 	// 1. 先从lsm拿key
 	// 2. 如果存了vlog，再取value
 	key = utils.KeyWithTs(key, math.MaxUint32)
-	if entry, err = o.lsm.Get(key); err == nil {
-		return entry, nil
+	if entry, err = o.lsm.Get(key); err != nil {
+		return entry, err
 	}
 	// 3. 判断是否存vlog
 	if entry != nil && utils.IsValuePtr(entry) {

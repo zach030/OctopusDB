@@ -74,7 +74,7 @@ func (m *MemTable) Set(entry *utils.Entry) error {
 	return nil
 }
 
-func (m *MemTable) Get(key []byte) *utils.Entry {
+func (m *MemTable) Get(key []byte) (*utils.Entry, error) {
 	vs := m.skipList.Search(key)
 
 	e := &utils.Entry{
@@ -84,7 +84,7 @@ func (m *MemTable) Get(key []byte) *utils.Entry {
 		Meta:      vs.Meta,
 		Version:   vs.Version,
 	}
-	return e
+	return e, nil
 }
 
 // refreshSkipList read and iterate wal file, fetch entry and add to skiplist

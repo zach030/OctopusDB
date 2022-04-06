@@ -1,11 +1,18 @@
 package kv
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/prometheus/common/log"
 
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
@@ -95,4 +102,78 @@ func TestAPI(t *testing.T) {
 			}
 		}
 	})
+}
+
+type User struct {
+	ID        string
+	Name      string
+	Follower  []string
+	Following []string
+}
+
+func TestGenerateRandomUserInfo(t *testing.T) {
+	users := make([]User, 0)
+	cnt := 100
+	for i := 0; i < cnt; i++ {
+		rand.Seed(time.Now().Unix())
+		u := User{
+			ID:        strconv.Itoa(i),
+			Name:      fmt.Sprintf("user-%v", i),
+			Follower:  getRandomFollower(time.Now().UnixNano()),
+			Following: getRandomFollower(time.Now().UnixNano()),
+		}
+		users = append(users, u)
+	}
+	content, err := json.Marshal(&users)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	ioutil.WriteFile("user.json", content, 0666)
+}
+
+func getRandomFollower(seed int64) []string {
+	rand.Seed(seed)
+	ret := make([]string, 0)
+	cnt := rand.Intn(10)
+	for i := 0; i < cnt; i++ {
+		ret = append(ret, strconv.Itoa(rand.Intn(100)))
+	}
+	return ret
+}
+
+func TestUserInfoQuery(t *testing.T) {
+	clearDir()
+	bytes, err := ioutil.ReadFile("user.json")
+	if err != nil {
+		log.Error(err)
+		return
+	}
+	users := make([]User, 0)
+	json.Unmarshal(bytes, &users)
+
+	db := Open(opt)
+	defer db.Close()
+	for _, user := range users {
+		val, _ := json.Marshal(user)
+		e := utils.NewEntry([]byte(user.ID), val).WithTTL(1000 * time.Second)
+		if err := db.Set(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < len(users); i++ {
+		u := users[i]
+		e, err := db.Get([]byte(u.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		user := User{}
+		err = json.Unmarshal(e.Value, &user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		require.Equal(t, u.Name, user.Name)
+		require.Equal(t, u.Follower, user.Follower)
+		require.Equal(t, u.Following, user.Following)
+	}
 }

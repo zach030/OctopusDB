@@ -92,14 +92,23 @@ func (l *LSM) Set(entry *utils.Entry) error {
 }
 
 func (l *LSM) Get(key []byte) (*utils.Entry, error) {
+	if len(key) == 0 {
+		return nil, utils.ErrEmptyKey
+	}
+	l.closer.Add(1)
+	defer l.closer.Done()
 	// 先查mt
-	if e := l.memTable.Get(key); e != nil {
-		return e, nil
+	var (
+		entry *utils.Entry
+		err   error
+	)
+	if entry, err = l.memTable.Get(key); entry != nil && entry.Value != nil {
+		return entry, err
 	}
 	// 再查imt
 	for _, im := range l.imMemTable {
-		if e := im.Get(key); e != nil {
-			return e, nil
+		if entry, err = im.Get(key); err != nil {
+			return nil, err
 		}
 	}
 	return l.levels.Get(key)
