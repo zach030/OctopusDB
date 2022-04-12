@@ -136,6 +136,7 @@ func (it *tableIterator) Seek(key []byte) {
 	})
 	if idx == 0 {
 		it.seek(0, key)
+		return
 	}
 	it.seek(idx-1, key)
 	if it.err == io.EOF {

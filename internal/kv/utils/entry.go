@@ -15,24 +15,25 @@ type ValueStruct struct {
 
 // EncodedSize value只持久化具体的value值和过期时间
 func (vs *ValueStruct) EncodedSize() uint32 {
-	sz := len(vs.Value)
+	sz := len(vs.Value) + 1 // add meta
 	enc := sizeVarint(vs.ExpiresAt)
 	return uint32(sz + enc)
 }
 
 // DecodeValue 反序列化到结构体
 func (vs *ValueStruct) DecodeValue(buf []byte) {
+	vs.Meta = buf[0]
 	var sz int
-	vs.ExpiresAt, sz = binary.Uvarint(buf)
-	vs.Value = buf[sz:]
+	vs.ExpiresAt, sz = binary.Uvarint(buf[1:])
+	vs.Value = buf[1+sz:]
 }
 
 //EncodeValue 对value进行编码，并将编码后的字节写入byte
 func (vs *ValueStruct) EncodeValue(b []byte) uint32 {
-	// 过期时间 | value
-	sz := binary.PutUvarint(b[:], vs.ExpiresAt)
-	n := copy(b[sz:], vs.Value)
-	return uint32(sz + n)
+	b[0] = vs.Meta
+	sz := binary.PutUvarint(b[1:], vs.ExpiresAt)
+	n := copy(b[1+sz:], vs.Value)
+	return uint32(1 + sz + n)
 }
 
 func sizeVarint(x uint64) (n int) {
@@ -101,6 +102,25 @@ func (e *Entry) EncodedSize() uint32 {
 	sz := len(e.Value)
 	enc := sizeVarint(e.ExpiresAt)
 	return uint32(sz + enc)
+}
+
+func (e *Entry) EstimateSize(threshold int) int {
+	if len(e.Value) < threshold {
+		return len(e.Key) + len(e.Value) + 1 // Meta
+	}
+	return len(e.Key) + 12 + 1 // 12 for ValuePointer, 2 for meta.
+}
+
+func (e *Entry) IsDeletedOrExpired() bool {
+	if e.Value == nil {
+		return true
+	}
+
+	if e.ExpiresAt == 0 {
+		return false
+	}
+
+	return e.ExpiresAt <= uint64(time.Now().Unix())
 }
 
 type Header struct {

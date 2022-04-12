@@ -36,6 +36,7 @@ type Config struct {
 	BaseTableSize       int64
 	NumLevelZeroTables  int
 	MaxLevelNum         int
+	DiscardStatsCh      *chan map[uint32]int64
 }
 
 func NewLSM(cfg *Config) *LSM {
@@ -69,11 +70,17 @@ func (l *LSM) Close() error {
 }
 
 func (l *LSM) Set(entry *utils.Entry) error {
-	// 判断memtable是否超过大小，需要关闭，新建memtable
-	if int64(l.memTable.wal.Size()) > l.cfg.MemTableSize {
-		l.imMemTable = append(l.imMemTable, l.memTable)
-		l.memTable = l.NewMemTable()
-		log.Info("[OverSize] memtable size is over limit, success new a memtable, curr immemtable size is:", len(l.imMemTable))
+	if entry == nil || len(entry.Key) == 0 {
+		return utils.ErrEmptyKey
+	}
+	// 优雅关闭
+	l.closer.Add(1)
+	defer l.closer.Done()
+	// 检查当前memtable是否写满，是的话创建新的memtable,并将当前内存表写到immutables中
+	// 否则写入当前memtable中
+	if int64(l.memTable.wal.Size())+
+		int64(utils.EstimateWalCodecSize(entry)) > l.cfg.MemTableSize {
+		l.Rotate()
 	}
 	if err := l.memTable.Set(entry); err != nil {
 		return err
@@ -121,6 +128,11 @@ func (l *LSM) StartCompaction() {
 	for i := 0; i < nums; i++ {
 		go l.levels.runCompacter(i)
 	}
+}
+
+func (l *LSM) Rotate() {
+	l.imMemTable = append(l.imMemTable, l.memTable)
+	l.memTable = l.NewMemTable()
 }
 
 // recover 重新构建内存索引

@@ -23,7 +23,7 @@ func (it *Item) Entry() *utils.Entry {
 }
 
 // NewIterator 创建LSM迭代器
-func (l *LSM) NewIterator(opt *utils.Options) utils.Iterator {
+func (l *LSM) NewIterator(opt *utils.Options) []utils.Iterator {
 	iter := &Iterator{}
 	iter.iters = make([]utils.Iterator, 0)
 	iter.iters = append(iter.iters, l.memTable.NewIterator(opt))
@@ -31,7 +31,7 @@ func (l *LSM) NewIterator(opt *utils.Options) utils.Iterator {
 		iter.iters = append(iter.iters, imm.NewIterator(opt))
 	}
 	iter.iters = append(iter.iters, l.levels.NewIterator(opt))
-	return iter
+	return iter.iters
 }
 
 func (iter *Iterator) Next() {

@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -89,4 +90,59 @@ func TestVlogBase(t *testing.T) {
 			Offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
+}
+
+func TestValueGC(t *testing.T) {
+	clearDir()
+	opt.ValueLogFileSize = 1 << 20
+	kv := Open(opt)
+	defer kv.Close()
+	sz := 32 << 10
+
+	t.Run("single", func(t *testing.T) {
+		e := newRandEntry(sz)
+		key := make([]byte, len(e.Key))
+		copy(key, e.Key)
+		value := make([]byte, len(e.Value))
+		copy(value, e.Value)
+		require.NoError(t, kv.Set(e))
+		item, err := kv.Get(key)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(utils.ParseKey(item.Key), key), "key not equal: item:%s, entry:%s", utils.ParseKey(item.Key), key)
+		require.True(t, bytes.Equal(item.Value, value), "value not equal: item:%s, entry:%s", item.Value, value)
+	})
+
+	kvList := []*utils.Entry{}
+	for i := 0; i < 100; i++ {
+		e := newRandEntry(sz)
+		kvList = append(kvList, &utils.Entry{
+			Key:       e.Key,
+			Value:     e.Value,
+			Meta:      e.Meta,
+			ExpiresAt: e.ExpiresAt,
+		})
+		require.NoError(t, kv.Set(e))
+	}
+	kv.RunValueLogGC(0.9)
+	for _, e := range kvList {
+		item, err := kv.Get(e.Key)
+		require.NoError(t, err)
+		val := getItemValue(t, item)
+		require.NotNil(t, val)
+		require.True(t, bytes.Equal(utils.ParseKey(item.Key), e.Key), "key not equal: item:%s, entry:%s", utils.ParseKey(item.Key), e.Key)
+		require.True(t, bytes.Equal(item.Value, e.Value), "value not equal: item:%s, entry:%s", item.Value, e.Value)
+	}
+}
+
+func getItemValue(t *testing.T, item *utils.Entry) (val []byte) {
+	t.Helper()
+	if item == nil {
+		return nil
+	}
+	var v []byte
+	v = append(v, item.Value...)
+	if v == nil {
+		return nil
+	}
+	return v
 }

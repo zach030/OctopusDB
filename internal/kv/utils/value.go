@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/binary"
 	"reflect"
+	"time"
 	"unsafe"
 )
 
@@ -56,12 +57,8 @@ func NewValuePtr(entry *Entry) *ValuePtr {
 	return &ValuePtr{}
 }
 
-func IsValuePtr(entry *Entry) bool {
-	return false
-}
-
-func ValuePtrCodec(vp *ValuePtr) []byte {
-	return []byte{}
+func IsValuePtr(e *Entry) bool {
+	return e.Meta&BitValuePointer > 0
 }
 
 func U32SliceToBytes(u32s []uint32) []byte {
@@ -105,4 +102,36 @@ func BytesToU32Slice(b []byte) []uint32 {
 	hdr.Cap = hdr.Len
 	hdr.Data = uintptr(unsafe.Pointer(&b[0]))
 	return u32s
+}
+
+func RunCallBack(cb func()) {
+	if cb != nil {
+		cb()
+	}
+}
+
+func IsDeletedOrExpired(meta byte, expiresAt uint64) bool {
+	if meta&BitDelete > 0 {
+		return true
+	}
+	if expiresAt == 0 {
+		return false
+	}
+	return expiresAt <= uint64(time.Now().Unix())
+}
+
+func DiscardEntry(e, vs *Entry) bool {
+	// TODO 版本这个信息应该被弱化掉 在后面上MVCC或者多版本查询的时候再考虑
+	// if vs.Version != ParseTs(e.Key) {
+	// 	// Version not found. Discard.
+	// 	return true
+	// }
+	if IsDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+		return true
+	}
+	if (vs.Meta & BitValuePointer) == 0 {
+		// Key also stores the value in LSM. Discard.
+		return true
+	}
+	return false
 }

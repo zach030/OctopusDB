@@ -25,14 +25,16 @@ func TestSkipListBasicCRUD(t *testing.T) {
 	//Put & Get
 	entry1 := NewEntry([]byte(RandString(10)), []byte("Val1"))
 	list.Add(entry1)
-	assert.Equal(t, entry1.Value, list.Search(entry1.Key).Value)
+	vs := list.Search(entry1.Key)
+	assert.Equal(t, entry1.Value, vs.Value)
 
 	entry2 := NewEntry([]byte(RandString(10)), []byte("Val2"))
 	list.Add(entry2)
-	assert.Equal(t, entry2.Value, list.Search(entry2.Key).Value)
+	vs = list.Search(entry2.Key)
+	assert.Equal(t, entry2.Value, vs.Value)
 
 	//Get a not exist entry
-	assert.Nil(t, list.Search([]byte("noexist123456")).Value)
+	assert.Nil(t, list.Search([]byte(RandString(10))).Value)
 
 	//Update a entry
 	entry2_new := NewEntry([]byte(RandString(10)), []byte("Val1+1"))

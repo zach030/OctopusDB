@@ -287,6 +287,35 @@ func (vlog *valueLog) replayLog(lf *file.LogFile, offset uint32, replayFn utils.
 	return nil
 }
 
+func (vlog *valueLog) read(vp *utils.ValuePtr) ([]byte, func(), error) {
+	buf, lf, err := vlog.readValueBytes(vp)
+	cb := vlog.getUnlockCallback(lf)
+	if err != nil {
+		return nil, cb, err
+	}
+	if vlog.opt.VerifyValueChecksum {
+		hash := crc32.New(utils.CastagnoliCrcTable)
+		if _, err := hash.Write(buf[:len(buf)-crc32.Size]); err != nil {
+			utils.RunCallBack(cb)
+			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
+		}
+		// Fetch checksum from the end of the buffer.
+		checksum := buf[len(buf)-crc32.Size:]
+		if hash.Sum32() != utils.BytesToU32(checksum) {
+			utils.RunCallBack(cb)
+			return nil, nil, errors.Wrapf(utils.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
+		}
+	}
+	var h utils.Header
+	headerLen := h.Decode(buf)
+	kv := buf[headerLen:]
+	if uint32(len(kv)) < h.KLen+h.VLen {
+		log.Errorf("Invalid read: vp: %+v\n", vp)
+		return nil, nil, errors.Errorf("Invalid read: Len: %d read at:[%d:%d]", len(kv), h.KLen, h.KLen+h.VLen)
+	}
+	return kv[h.KLen : h.KLen+h.VLen], cb, nil
+}
+
 // readValueBytes return vlog entry slice and read locked log file. Caller should take care of
 // logFile unlocking.
 func (vlog *valueLog) readValueBytes(vp *utils.ValuePtr) ([]byte, *file.LogFile, error) {

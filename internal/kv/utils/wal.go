@@ -118,3 +118,9 @@ func (t *HashReader) ReadByte() (byte, error) {
 func (t *HashReader) Sum32() uint32 {
 	return t.H.Sum32()
 }
+
+// EstimateWalCodecSize 预估当前kv 写入wal文件占用的空间大小
+func EstimateWalCodecSize(e *Entry) int {
+	return len(e.Key) + len(e.Value) + 8 /* ExpiresAt uint64 */ +
+		crc32.Size + maxHeaderSize
+}
