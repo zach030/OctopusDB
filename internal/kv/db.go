@@ -16,11 +16,11 @@ import (
 	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
-type API interface {
+type Engine interface {
 	Set(data *utils.Entry) error
 	Get(key []byte) (*utils.Entry, error)
 	Del(key []byte) error
-	NewIterator(opt *Options) utils.Iterator
+	NewIterator(opt *utils.Options) utils.Iterator
 	Info() *stat
 	Close() error
 }
