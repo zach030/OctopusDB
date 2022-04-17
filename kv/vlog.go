@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	file2 "github.com/zach030/OctopusDB/kv/file"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/prometheus/common/log"
 
 	"github.com/pkg/errors"
-
-	"github.com/zach030/OctopusDB/internal/kv/file"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 const discardStatsFlushThreshold = 100
@@ -35,7 +35,7 @@ type valueLog struct {
 	dirPath string
 	// guards our view of which files exist, which to be deleted, how many active iterators
 	filesLock        sync.RWMutex
-	filesMap         map[uint32]*file.LogFile
+	filesMap         map[uint32]*file2.LogFile
 	maxFid           uint32
 	filesToBeDeleted []uint32
 	// A refcount of iterators -- when this hits zero, we can delete the filesToBeDeleted.
@@ -55,14 +55,14 @@ type lfDiscardStats struct {
 	sync.RWMutex
 	m                 map[uint32]int64
 	flushChan         chan map[uint32]int64
-	closer            *utils.Closer
+	closer            *utils2.Closer
 	updatesSinceFlush int
 }
 
-func (vlog *valueLog) newValuePtr(e *utils.Entry) (*utils.ValuePtr, error) {
+func (vlog *valueLog) newValuePtr(e *utils2.Entry) (*utils2.ValuePtr, error) {
 	req := requestPool.Get().(*request)
 	req.reset()
-	req.Entries = []*utils.Entry{e}
+	req.Entries = []*utils2.Entry{e}
 	req.Wg.Add(1)
 	req.IncrRef() // for db write
 	defer req.DecrRef()
@@ -70,7 +70,7 @@ func (vlog *valueLog) newValuePtr(e *utils.Entry) (*utils.ValuePtr, error) {
 	return req.Ptrs[0], err
 }
 
-func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
+func (vlog *valueLog) open(ptr *utils2.ValuePtr, replayFn utils2.LogEntry) error {
 	vlog.lfDiscardStats.closer.Add(1)
 	go vlog.flushDiscardStats()
 	// 统计所有vlog文件
@@ -93,7 +93,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 		// 打开mmap映射的vlog文件
 		var err error
 		if err = lf.Open(
-			&file.Option{
+			&file2.Option{
 				FID:      uint64(fid),
 				FileName: vlog.fpath(fid),
 				Dir:      vlog.dirPath,
@@ -113,7 +113,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 		// 对此vlog文件进行重放日志
 		if err := vlog.replayLog(lf, offset, replayFn); err != nil {
 			// Log file is corrupted. Delete it.
-			if err == utils.ErrDeleteVlogFile {
+			if err == utils2.ErrDeleteVlogFile {
 				delete(vlog.filesMap, fid)
 				// Close the fd of the file before deleting the file otherwise windows complaints.
 				if err := lf.Close(); err != nil {
@@ -150,7 +150,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 	vlog.writableLogOffset = uint32(lastOffset)
 
 	// head的设计起到check point的作用
-	vlog.db.vhead = &utils.ValuePtr{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
+	vlog.db.vhead = &utils2.ValuePtr{Fid: vlog.maxFid, Offset: uint32(lastOffset)}
 	if err := vlog.populateDiscardStats(); err != nil {
 		log.Error(fmt.Errorf("Failed to populate discard stats: %s\n", err))
 	}
@@ -159,7 +159,7 @@ func (vlog *valueLog) open(ptr *utils.ValuePtr, replayFn utils.LogEntry) error {
 
 // populateFilesMap 填充文件目录下的所有vlog文件
 func (vlog *valueLog) populateFilesMap() error {
-	vlog.filesMap = make(map[uint32]*file.LogFile)
+	vlog.filesMap = make(map[uint32]*file2.LogFile)
 	files, err := ioutil.ReadDir(vlog.dirPath)
 	if err != nil {
 		return errors.Wrapf(err, fmt.Sprintf("Unable to open log dir. path[%s]", vlog.dirPath))
@@ -179,7 +179,7 @@ func (vlog *valueLog) populateFilesMap() error {
 		}
 		found[fid] = struct{}{}
 
-		lf := &file.LogFile{
+		lf := &file2.LogFile{
 			FID:  uint32(fid),
 			Lock: sync.RWMutex{},
 		}
@@ -192,16 +192,16 @@ func (vlog *valueLog) populateFilesMap() error {
 }
 
 // createVlogFile 创建指定fid的vlog文件
-func (vlog *valueLog) createVlogFile(fid uint32) (*file.LogFile, error) {
+func (vlog *valueLog) createVlogFile(fid uint32) (*file2.LogFile, error) {
 	path := vlog.fpath(fid)
 
-	lf := &file.LogFile{
+	lf := &file2.LogFile{
 		FID:  fid,
 		Lock: sync.RWMutex{},
 	}
 
 	var err error
-	if err = lf.Open(&file.Option{
+	if err = lf.Open(&file2.Option{
 		FID:      uint64(fid),
 		FileName: path,
 		Dir:      vlog.dirPath,
@@ -221,7 +221,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*file.LogFile, error) {
 		return nil, err
 	}
 
-	if err = utils.SyncDir(vlog.dirPath); err != nil {
+	if err = utils2.SyncDir(vlog.dirPath); err != nil {
 		removeFile()
 		return nil, errors.Wrapf(err, fmt.Sprintf("Sync value log dir[%s]", vlog.dirPath))
 	}
@@ -229,7 +229,7 @@ func (vlog *valueLog) createVlogFile(fid uint32) (*file.LogFile, error) {
 	vlog.filesMap[fid] = lf
 	vlog.maxFid = fid
 	// 现在header才是0
-	atomic.StoreUint32(&vlog.writableLogOffset, utils.VlogHeaderSize)
+	atomic.StoreUint32(&vlog.writableLogOffset, utils2.VlogHeaderSize)
 	vlog.numEntriesWritten = 0
 	vlog.filesLock.Unlock()
 	return lf, nil
@@ -255,7 +255,7 @@ func (vlog *valueLog) sortedFids() []uint32 {
 }
 
 // replayLog 重放vlog
-func (vlog *valueLog) replayLog(lf *file.LogFile, offset uint32, replayFn utils.LogEntry) error {
+func (vlog *valueLog) replayLog(lf *file2.LogFile, offset uint32, replayFn utils2.LogEntry) error {
 	// Alright, let's iterate now.
 	endOffset, err := lf.Iterate(offset, replayFn)
 	if err != nil {
@@ -273,9 +273,9 @@ func (vlog *valueLog) replayLog(lf *file.LogFile, offset uint32, replayFn utils.
 	// We mmap 2*opt.ValueLogSize for the last file. See vlog.Open() function
 	// if endOffset <= vlogHeaderSize && lf.fid != vlog.maxFid {
 
-	if endOffset <= utils.VlogHeaderSize {
+	if endOffset <= utils2.VlogHeaderSize {
 		if lf.FID != vlog.maxFid {
-			return utils.ErrDeleteVlogFile
+			return utils2.ErrDeleteVlogFile
 		}
 		return lf.Bootstrap()
 	}
@@ -287,26 +287,26 @@ func (vlog *valueLog) replayLog(lf *file.LogFile, offset uint32, replayFn utils.
 	return nil
 }
 
-func (vlog *valueLog) read(vp *utils.ValuePtr) ([]byte, func(), error) {
+func (vlog *valueLog) read(vp *utils2.ValuePtr) ([]byte, func(), error) {
 	buf, lf, err := vlog.readValueBytes(vp)
 	cb := vlog.getUnlockCallback(lf)
 	if err != nil {
 		return nil, cb, err
 	}
 	if vlog.opt.VerifyValueChecksum {
-		hash := crc32.New(utils.CastagnoliCrcTable)
+		hash := crc32.New(utils2.CastagnoliCrcTable)
 		if _, err := hash.Write(buf[:len(buf)-crc32.Size]); err != nil {
-			utils.RunCallBack(cb)
+			utils2.RunCallBack(cb)
 			return nil, nil, errors.Wrapf(err, "failed to write hash for vp %+v", vp)
 		}
 		// Fetch checksum from the end of the buffer.
 		checksum := buf[len(buf)-crc32.Size:]
-		if hash.Sum32() != utils.BytesToU32(checksum) {
-			utils.RunCallBack(cb)
-			return nil, nil, errors.Wrapf(utils.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
+		if hash.Sum32() != utils2.BytesToU32(checksum) {
+			utils2.RunCallBack(cb)
+			return nil, nil, errors.Wrapf(utils2.ErrChecksumMismatch, "value corrupted for vp: %+v", vp)
 		}
 	}
-	var h utils.Header
+	var h utils2.Header
 	headerLen := h.Decode(buf)
 	kv := buf[headerLen:]
 	if uint32(len(kv)) < h.KLen+h.VLen {
@@ -318,7 +318,7 @@ func (vlog *valueLog) read(vp *utils.ValuePtr) ([]byte, func(), error) {
 
 // readValueBytes return vlog entry slice and read locked log file. Caller should take care of
 // logFile unlocking.
-func (vlog *valueLog) readValueBytes(vp *utils.ValuePtr) ([]byte, *file.LogFile, error) {
+func (vlog *valueLog) readValueBytes(vp *utils2.ValuePtr) ([]byte, *file2.LogFile, error) {
 	// 根据值指针读vlog，首先根据id选出所在的vlog
 	lf, err := vlog.getVLogFile(vp)
 	if err != nil {
@@ -334,7 +334,7 @@ func (vlog *valueLog) readValueBytes(vp *utils.ValuePtr) ([]byte, *file.LogFile,
 	return buf, lf, nil
 }
 
-func (vlog *valueLog) getVLogFile(vp *utils.ValuePtr) (*file.LogFile, error) {
+func (vlog *valueLog) getVLogFile(vp *utils2.ValuePtr) (*file2.LogFile, error) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	lf, ok := vlog.filesMap[vp.Fid]
@@ -356,7 +356,7 @@ func (vlog *valueLog) getVLogFile(vp *utils.ValuePtr) (*file.LogFile, error) {
 
 // getUnlockCallback will returns a function which unlock the logfile if the logfile is mmaped.
 // otherwise, it unlock the logfile and return nil.
-func (vlog *valueLog) getUnlockCallback(lf *file.LogFile) func() {
+func (vlog *valueLog) getUnlockCallback(lf *file2.LogFile) func() {
 	if lf == nil {
 		return nil
 	}
@@ -418,10 +418,10 @@ func (vlog *valueLog) write(reqs []*request) error {
 		for j := range b.Entries {
 			en := b.Entries[j]
 			if vlog.db.shouldWriteValueToLSM(en) {
-				b.Ptrs = append(b.Ptrs, &utils.ValuePtr{})
+				b.Ptrs = append(b.Ptrs, &utils2.ValuePtr{})
 				continue
 			}
-			var p utils.ValuePtr
+			var p utils2.ValuePtr
 			p.Fid = currLogFile.FID
 			p.Offset = vlog.woffset() + uint32(buf.Len())
 			plen, err := currLogFile.EncodeEntry(en, &buf, p.Offset)
@@ -458,9 +458,9 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 	for _, req := range reqs {
 		size := estimateRequestSize(req)
 		aboutSize := currOffset + size
-		if aboutSize > uint64(utils.MaxVlogFileSize) {
+		if aboutSize > uint64(utils2.MaxVlogFileSize) {
 			return errors.Errorf("Request size offset %d is bigger than maximum offset %d",
-				aboutSize, utils.MaxVlogFileSize)
+				aboutSize, utils2.MaxVlogFileSize)
 		}
 		if aboutSize >= uint64(vlog.opt.ValueLogFileSize) {
 			// We'll create a new vlog file if the estimated offset is greater or equal to
@@ -478,7 +478,7 @@ func (vlog *valueLog) validateWrites(reqs []*request) error {
 func estimateRequestSize(req *request) uint64 {
 	size := uint64(0)
 	for _, e := range req.Entries {
-		size += uint64(utils.MaxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
+		size += uint64(utils2.MaxHeaderSize + len(e.Key) + len(e.Value) + crc32.Size)
 	}
 	return size
 }
@@ -497,9 +497,9 @@ var requestPool = sync.Pool{
 // request
 type request struct {
 	// Input values
-	Entries []*utils.Entry
+	Entries []*utils2.Entry
 	// Output values and wait group stuff below
-	Ptrs []*utils.ValuePtr
+	Ptrs []*utils2.ValuePtr
 	Wg   sync.WaitGroup
 	Err  error
 	ref  int32
@@ -540,7 +540,7 @@ func (o *OctopusDB) InitVlog() {
 		filesToBeDeleted: make([]uint32, 0),
 		lfDiscardStats: &lfDiscardStats{
 			m:         make(map[uint32]int64),
-			closer:    utils.NewCloser(),
+			closer:    utils2.NewCloser(),
 			flushChan: make(chan map[uint32]int64, 16),
 		},
 	}
@@ -554,23 +554,23 @@ func (o *OctopusDB) InitVlog() {
 }
 
 // getHead checkpoint of all value-log
-func (o *OctopusDB) getHead() (*utils.ValuePtr, uint64) {
-	var vptr utils.ValuePtr
+func (o *OctopusDB) getHead() (*utils2.ValuePtr, uint64) {
+	var vptr utils2.ValuePtr
 	return &vptr, 0
 }
 
 // replayFunction 重放vlog中的entry 保证lsm与vlog数据的一致性
-func (o *OctopusDB) replayFunction() func(*utils.Entry, *utils.ValuePtr) error {
+func (o *OctopusDB) replayFunction() func(*utils2.Entry, *utils2.ValuePtr) error {
 	// 将entry写入lsm
-	toLSM := func(k []byte, vs utils.ValueStruct) {
-		o.lsm.Set(&utils.Entry{
+	toLSM := func(k []byte, vs utils2.ValueStruct) {
+		o.lsm.Set(&utils2.Entry{
 			Key:       k,
 			Value:     vs.Value,
 			ExpiresAt: vs.ExpiresAt,
 			Meta:      vs.Meta,
 		})
 	}
-	return func(e *utils.Entry, vp *utils.ValuePtr) error { // Function for replaying.
+	return func(e *utils2.Entry, vp *utils2.ValuePtr) error { // Function for replaying.
 		nk := make([]byte, len(e.Key))
 		copy(nk, e.Key)
 		var nv []byte
@@ -580,14 +580,14 @@ func (o *OctopusDB) replayFunction() func(*utils.Entry, *utils.ValuePtr) error {
 			copy(nv, e.Value)
 		} else {
 			nv = vp.Encode()
-			meta = meta | utils.BitValuePointer
+			meta = meta | utils2.BitValuePointer
 		}
 		// Update vhead. If the crash happens while replay was in progess
 		// and the head is not updated, we will end up replaying all the
 		// files starting from file zero, again.
-		o.updateHead([]*utils.ValuePtr{vp})
+		o.updateHead([]*utils2.ValuePtr{vp})
 
-		v := utils.ValueStruct{
+		v := utils2.ValueStruct{
 			Value:     nv,
 			Meta:      meta,
 			ExpiresAt: e.ExpiresAt,
@@ -600,8 +600,8 @@ func (o *OctopusDB) replayFunction() func(*utils.Entry, *utils.ValuePtr) error {
 
 // updateHead should not be called without the db.Lock() since db.vhead is used
 // by the writer go routines and memtable flushing goroutine.
-func (o *OctopusDB) updateHead(ptrs []*utils.ValuePtr) {
-	var ptr *utils.ValuePtr
+func (o *OctopusDB) updateHead(ptrs []*utils2.ValuePtr) {
+	var ptr *utils2.ValuePtr
 	for i := len(ptrs) - 1; i >= 0; i-- {
 		p := ptrs[i]
 		if !p.IsZero() {
@@ -619,7 +619,7 @@ func (o *OctopusDB) updateHead(ptrs []*utils.ValuePtr) {
 }
 
 func (vlog *valueLog) fpath(fid uint32) string {
-	return utils.VlogFilePath(vlog.dirPath, fid)
+	return utils2.VlogFilePath(vlog.dirPath, fid)
 }
 
 func (vlog *valueLog) flushDiscardStats() {
@@ -650,8 +650,8 @@ func (vlog *valueLog) flushDiscardStats() {
 			return err
 		}
 
-		entries := []*utils.Entry{{
-			Key:   utils.KeyWithTs(lfDiscardStatsKey, 1),
+		entries := []*utils2.Entry{{
+			Key:   utils2.KeyWithTs(lfDiscardStatsKey, 1),
 			Value: encodedDS,
 		}}
 		req, err := vlog.db.sendToWriteCh(entries)

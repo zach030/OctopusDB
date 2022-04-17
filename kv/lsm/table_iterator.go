@@ -5,22 +5,21 @@ import (
 	"io"
 	"sort"
 
-	"github.com/zach030/OctopusDB/internal/kv/pb"
-
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 )
 
 // tableIterator curr-table-->curr-block-->curr-entry
 type tableIterator struct {
-	item     utils.Item
-	opt      *utils.Options
+	item     utils2.Item
+	opt      *utils2.Options
 	t        *table
 	blockPos int
 	bi       *blockIterator
 	err      error
 }
 
-func (t *table) NewIterator(options *utils.Options) utils.Iterator {
+func (t *table) NewIterator(options *utils2.Options) utils2.Iterator {
 	t.IncrRef()
 	return &tableIterator{
 		opt: options,
@@ -162,7 +161,7 @@ func (it *tableIterator) seek(blockIndex int, key []byte) {
 	it.item = it.bi.Item()
 }
 
-func (it *tableIterator) Item() utils.Item {
+func (it *tableIterator) Item() utils2.Item {
 	return it.item
 }
 
@@ -181,7 +180,7 @@ type blockIterator struct {
 
 	prevOverlap uint16
 
-	it utils.Item
+	it utils2.Item
 }
 
 func (b *blockIterator) Next() {
@@ -228,12 +227,12 @@ func (b *blockIterator) Seek(key []byte) {
 			return false
 		}
 		b.setIdx(i)
-		return utils.CompareKeys(b.key, key) >= 0
+		return utils2.CompareKeys(b.key, key) >= 0
 	})
 	b.setIdx(entryIdx)
 }
 
-func (b *blockIterator) Item() utils.Item {
+func (b *blockIterator) Item() utils2.Item {
 	return b.it
 }
 
@@ -282,8 +281,8 @@ func (b *blockIterator) setIdx(idx int) {
 	diffKey := entryData[headerSize:valueOffset]
 	b.key = append(b.key[:h.overlap], diffKey...)
 
-	entry := utils.NewEntry(b.key, nil)
-	val := &utils.ValueStruct{}
+	entry := utils2.NewEntry(b.key, nil)
+	val := &utils2.ValueStruct{}
 	val.DecodeValue(entryData[valueOffset:])
 	b.val = val.Value
 	entry.Value = val.Value

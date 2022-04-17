@@ -1,6 +1,8 @@
 package kv
 
-import "github.com/zach030/OctopusDB/internal/kv/utils"
+import (
+	"github.com/zach030/OctopusDB/kv/utils"
+)
 
 // Options corekv 总的配置文件
 type Options struct {

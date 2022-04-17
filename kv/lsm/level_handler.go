@@ -5,9 +5,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/pkg/errors"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/pkg/errors"
 )
 
 // levelHandler 管理每一层的元数据
@@ -25,14 +25,14 @@ func (h *levelHandler) close() error {
 	return nil
 }
 
-func (h *levelHandler) Get(key []byte) (*utils.Entry, error) {
+func (h *levelHandler) Get(key []byte) (*utils2.Entry, error) {
 	if h.level == 0 {
 		return h.SearchL0(key)
 	}
 	return h.SearchLN(key)
 }
 
-func (h *levelHandler) SearchL0(key []byte) (*utils.Entry, error) {
+func (h *levelHandler) SearchL0(key []byte) (*utils2.Entry, error) {
 	var version uint64
 	for _, t := range h.tables {
 		if entry, err := t.Search(key, &version); err == nil {
@@ -42,7 +42,7 @@ func (h *levelHandler) SearchL0(key []byte) (*utils.Entry, error) {
 	return nil, errors.New("key not found")
 }
 
-func (h *levelHandler) SearchLN(key []byte) (*utils.Entry, error) {
+func (h *levelHandler) SearchLN(key []byte) (*utils2.Entry, error) {
 	tbl := h.getTable(key)
 	if tbl == nil {
 		return nil, errors.New("key not found")
@@ -71,7 +71,7 @@ func (h *levelHandler) Sort() {
 		})
 	} else {
 		sort.Slice(h.tables, func(i, j int) bool {
-			return utils.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
+			return utils2.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
 		})
 	}
 }
@@ -160,7 +160,7 @@ func (h *levelHandler) ReplaceTables(old, new []*table) error {
 	}
 	h.tables = newTables
 	sort.Slice(h.tables, func(i, j int) bool {
-		return utils.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
+		return utils2.CompareKeys(h.tables[i].sst.MinKey(), h.tables[j].sst.MinKey()) < 0
 	})
 	h.Unlock()
 	return decrRefs(old)

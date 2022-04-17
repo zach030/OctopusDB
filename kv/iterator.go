@@ -1,23 +1,23 @@
 package kv
 
 import (
-	"github.com/zach030/OctopusDB/internal/kv/lsm"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/zach030/OctopusDB/kv/lsm"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 )
 
 type DBIterator struct {
-	iitr utils.Iterator
+	iitr utils2.Iterator
 	vlog *valueLog
 }
 type Item struct {
-	e *utils.Entry
+	e *utils2.Entry
 }
 
-func (it *Item) Entry() *utils.Entry {
+func (it *Item) Entry() *utils2.Entry {
 	return it.e
 }
-func (o *OctopusDB) NewIterator(opt *utils.Options) utils.Iterator {
-	iters := make([]utils.Iterator, 0)
+func (o *OctopusDB) NewIterator(opt *utils2.Options) utils2.Iterator {
+	iters := make([]utils2.Iterator, 0)
 	iters = append(iters, o.lsm.NewIterator(opt)...)
 
 	res := &DBIterator{
@@ -40,27 +40,27 @@ func (iter *DBIterator) Rewind() {
 	for ; iter.Valid() && iter.Item() == nil; iter.iitr.Next() {
 	}
 }
-func (iter *DBIterator) Item() utils.Item {
+func (iter *DBIterator) Item() utils2.Item {
 	// 检查从lsm拿到的value是否是value ptr,是则从vlog中拿值
 	e := iter.iitr.Item().Entry()
 	var value []byte
 
-	if e != nil && utils.IsValuePtr(e) {
-		var vp utils.ValuePtr
+	if e != nil && utils2.IsValuePtr(e) {
+		var vp utils2.ValuePtr
 		vp.Decode(e.Value)
 		result, cb, err := iter.vlog.read(&vp)
-		defer utils.RunCallBack(cb)
+		defer utils2.RunCallBack(cb)
 		if err != nil {
 			return nil
 		}
-		value = utils.SafeCopy(nil, result)
+		value = utils2.SafeCopy(nil, result)
 	}
 
 	if e.IsDeletedOrExpired() || value == nil {
 		return nil
 	}
 
-	res := &utils.Entry{
+	res := &utils2.Entry{
 		Key:          e.Key,
 		Value:        value,
 		ExpiresAt:    e.ExpiresAt,

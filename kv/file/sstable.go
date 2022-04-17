@@ -6,14 +6,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/prometheus/common/log"
 
-	"github.com/pkg/errors"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
-
 	"github.com/golang/protobuf/proto"
-
-	"github.com/zach030/OctopusDB/internal/kv/pb"
+	"github.com/pkg/errors"
 )
 
 // SSTable construct of : block1 | block2 | ... | index_data | index_len | check_sum | check_sum_len
@@ -81,7 +80,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	checksumLen := int(utils.BytesToU32(buf))
+	checksumLen := int(utils2.BytesToU32(buf))
 	if checksumLen < 0 {
 		return nil, errors.New("checksum length less zero")
 	}
@@ -97,7 +96,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.idxLen = int(utils.BytesToU32(buf))
+	s.idxLen = int(utils2.BytesToU32(buf))
 	// read index
 	off -= s.idxLen
 	s.idxStart = off
@@ -105,7 +104,7 @@ func (s *SSTable) initSSTable() (*pb.BlockOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := utils.VerifyChecksum(buf, expectChecksum); err != nil {
+	if err := utils2.VerifyChecksum(buf, expectChecksum); err != nil {
 		return nil, errors.Wrapf(err, "failed to verify checksum for table: %s", s.mf.Fd.Name())
 	}
 	indexTable := &pb.TableIndex{}

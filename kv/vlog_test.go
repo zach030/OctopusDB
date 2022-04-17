@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"testing"
 
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/stretchr/testify/require"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 var (
@@ -34,20 +35,20 @@ func TestVlogBase(t *testing.T) {
 	const val2 = "samplevalb012345678901234567890123"
 	require.True(t, int64(len(val1)) >= db.opt.ValueThreshold)
 
-	e1 := &utils.Entry{
+	e1 := &utils2.Entry{
 		Key:   []byte("samplekey"),
 		Value: []byte(val1),
-		Meta:  utils.BitValuePointer,
+		Meta:  utils2.BitValuePointer,
 	}
-	e2 := &utils.Entry{
+	e2 := &utils2.Entry{
 		Key:   []byte("samplekeyb"),
 		Value: []byte(val2),
-		Meta:  utils.BitValuePointer,
+		Meta:  utils2.BitValuePointer,
 	}
 
 	// 构建一个批量请求的request
 	b := new(request)
-	b.Entries = []*utils.Entry{e1, e2}
+	b.Entries = []*utils2.Entry{e1, e2}
 
 	// 直接写入vlog中
 	log.write([]*request{b})
@@ -75,18 +76,18 @@ func TestVlogBase(t *testing.T) {
 	require.NoError(t, err)
 
 	// 比较entry对象是否相等
-	readEntries := []utils.Entry{*e1, *e2}
-	require.EqualValues(t, []utils.Entry{
+	readEntries := []utils2.Entry{*e1, *e2}
+	require.EqualValues(t, []utils2.Entry{
 		{
 			Key:    []byte("samplekey"),
 			Value:  []byte(val1),
-			Meta:   utils.BitValuePointer,
+			Meta:   utils2.BitValuePointer,
 			Offset: b.Ptrs[0].Offset,
 		},
 		{
 			Key:    []byte("samplekeyb"),
 			Value:  []byte(val2),
-			Meta:   utils.BitValuePointer,
+			Meta:   utils2.BitValuePointer,
 			Offset: b.Ptrs[1].Offset,
 		},
 	}, readEntries)
@@ -108,14 +109,14 @@ func TestValueGC(t *testing.T) {
 		require.NoError(t, kv.Set(e))
 		item, err := kv.Get(key)
 		require.NoError(t, err)
-		require.True(t, bytes.Equal(utils.ParseKey(item.Key), key), "key not equal: item:%s, entry:%s", utils.ParseKey(item.Key), key)
+		require.True(t, bytes.Equal(utils2.ParseKey(item.Key), key), "key not equal: item:%s, entry:%s", utils2.ParseKey(item.Key), key)
 		require.True(t, bytes.Equal(item.Value, value), "value not equal: item:%s, entry:%s", item.Value, value)
 	})
 
-	kvList := []*utils.Entry{}
+	kvList := []*utils2.Entry{}
 	for i := 0; i < 100; i++ {
 		e := newRandEntry(sz)
-		kvList = append(kvList, &utils.Entry{
+		kvList = append(kvList, &utils2.Entry{
 			Key:       e.Key,
 			Value:     e.Value,
 			Meta:      e.Meta,
@@ -129,12 +130,12 @@ func TestValueGC(t *testing.T) {
 		require.NoError(t, err)
 		val := getItemValue(t, item)
 		require.NotNil(t, val)
-		require.True(t, bytes.Equal(utils.ParseKey(item.Key), e.Key), "key not equal: item:%s, entry:%s", utils.ParseKey(item.Key), e.Key)
+		require.True(t, bytes.Equal(utils2.ParseKey(item.Key), e.Key), "key not equal: item:%s, entry:%s", utils2.ParseKey(item.Key), e.Key)
 		require.True(t, bytes.Equal(item.Value, e.Value), "value not equal: item:%s, entry:%s", item.Value, e.Value)
 	}
 }
 
-func getItemValue(t *testing.T, item *utils.Entry) (val []byte) {
+func getItemValue(t *testing.T, item *utils2.Entry) (val []byte) {
 	t.Helper()
 	if item == nil {
 		return nil

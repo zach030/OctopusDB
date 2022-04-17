@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
 	"github.com/pkg/errors"
 )
@@ -47,7 +47,7 @@ func (lf *LogFile) Open(opt *Option) error {
 }
 
 // Read Acquire lock on mmap/file if you are calling this
-func (lf *LogFile) Read(p *utils.ValuePtr) (buf []byte, err error) {
+func (lf *LogFile) Read(p *utils2.ValuePtr) (buf []byte, err error) {
 	offset := p.Offset
 	// Do not convert size to uint32, because the lf.fmap can be of size
 	// 4GB, which overflows the uint32 during conversion to make the size 0,
@@ -152,19 +152,19 @@ func (lf *LogFile) Sync() error {
 // +--------+-----+-------+-------+
 // | header | key | value | crc32 |
 // +--------+-----+-------+-------+
-func (lf *LogFile) EncodeEntry(e *utils.Entry, buf *bytes.Buffer, offset uint32) (int, error) {
-	h := utils.Header{
+func (lf *LogFile) EncodeEntry(e *utils2.Entry, buf *bytes.Buffer, offset uint32) (int, error) {
+	h := utils2.Header{
 		KLen:      uint32(len(e.Key)),
 		VLen:      uint32(len(e.Value)),
 		ExpiresAt: e.ExpiresAt,
 		Meta:      e.Meta,
 	}
 
-	hash := crc32.New(utils.CastagnoliCrcTable)
+	hash := crc32.New(utils2.CastagnoliCrcTable)
 	writer := io.MultiWriter(buf, hash)
 
 	// encode header.
-	var headerEnc [utils.MaxHeaderSize]byte
+	var headerEnc [utils2.MaxHeaderSize]byte
 	sz := h.Encode(headerEnc[:])
 	_, err := writer.Write(headerEnc[:sz])
 	if err != nil {
@@ -189,11 +189,11 @@ func (lf *LogFile) EncodeEntry(e *utils.Entry, buf *bytes.Buffer, offset uint32)
 	// return encoded length.
 	return len(headerEnc[:sz]) + len(e.Key) + len(e.Value) + len(crcBuf), nil
 }
-func (lf *LogFile) DecodeEntry(buf []byte, offset uint32) (*utils.Entry, error) {
-	var h utils.Header
+func (lf *LogFile) DecodeEntry(buf []byte, offset uint32) (*utils2.Entry, error) {
+	var h utils2.Header
 	hlen := h.Decode(buf)
 	kv := buf[hlen:]
-	e := &utils.Entry{
+	e := &utils2.Entry{
 		Meta:      h.Meta,
 		ExpiresAt: h.ExpiresAt,
 		Offset:    offset,
@@ -209,9 +209,9 @@ func (lf *LogFile) Bootstrap() error {
 	return nil
 }
 
-func (lf *LogFile) Iterate(offset uint32, fn utils.LogEntry) (uint32, error) {
+func (lf *LogFile) Iterate(offset uint32, fn utils2.LogEntry) (uint32, error) {
 	if offset == 0 {
-		offset = utils.VlogHeaderSize
+		offset = utils2.VlogHeaderSize
 	}
 	if int64(offset) == lf.Size() {
 		// We're at the end of the file already. No need to do anything.
@@ -239,7 +239,7 @@ loop:
 		switch {
 		case err == io.EOF:
 			break loop
-		case err == io.ErrUnexpectedEOF || err == utils.ErrTruncate:
+		case err == io.ErrUnexpectedEOF || err == utils2.ErrTruncate:
 			break loop
 		case err != nil:
 			return 0, err
@@ -247,7 +247,7 @@ loop:
 			continue
 		}
 
-		var vp utils.ValuePtr
+		var vp utils2.ValuePtr
 		vp.Len = uint32(e.Hlen + len(e.Key) + len(e.Value) + crc32.Size)
 		read.recordOffset += vp.Len
 
@@ -255,7 +255,7 @@ loop:
 		vp.Fid = lf.FID
 		validEndOffset = read.recordOffset
 		if err := fn(e, &vp); err != nil {
-			if err == utils.ErrStop {
+			if err == utils2.ErrStop {
 				break
 			}
 			return 0, errors.Wrapf(err, fmt.Sprintf("Iteration function %s", lf.FileName()))
@@ -273,15 +273,15 @@ type safeRead struct {
 
 // Entry reads an entry from the provided reader. It also validates the checksum for every entry
 // read. Returns error on failure.
-func (r *safeRead) Entry(reader io.Reader) (*utils.Entry, error) {
-	tee := utils.NewHashReader(reader)
-	var h utils.Header
+func (r *safeRead) Entry(reader io.Reader) (*utils2.Entry, error) {
+	tee := utils2.NewHashReader(reader)
+	var h utils2.Header
 	hlen, err := h.DecodeFrom(tee)
 	if err != nil {
 		return nil, err
 	}
 	if h.KLen > uint32(1<<16) { // Key length must be below uint16.
-		return nil, utils.ErrTruncate
+		return nil, utils2.ErrTruncate
 	}
 	kl := int(h.KLen)
 	if cap(r.k) < kl {
@@ -292,13 +292,13 @@ func (r *safeRead) Entry(reader io.Reader) (*utils.Entry, error) {
 		r.v = make([]byte, 2*vl)
 	}
 
-	e := &utils.Entry{}
+	e := &utils2.Entry{}
 	e.Offset = r.recordOffset
 	e.Hlen = hlen
 	buf := make([]byte, h.KLen+h.VLen)
 	if _, err := io.ReadFull(tee, buf[:]); err != nil {
 		if err == io.EOF {
-			err = utils.ErrTruncate
+			err = utils2.ErrTruncate
 		}
 		return nil, err
 	}
@@ -308,13 +308,13 @@ func (r *safeRead) Entry(reader io.Reader) (*utils.Entry, error) {
 	var crcBuf [crc32.Size]byte
 	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
 		if err == io.EOF {
-			err = utils.ErrTruncate
+			err = utils2.ErrTruncate
 		}
 		return nil, err
 	}
-	crc := utils.BytesToU32(crcBuf[:])
+	crc := utils2.BytesToU32(crcBuf[:])
 	if crc != tee.Sum32() {
-		return nil, utils.ErrTruncate
+		return nil, utils2.ErrTruncate
 	}
 	e.Meta = h.Meta
 	e.ExpiresAt = h.ExpiresAt

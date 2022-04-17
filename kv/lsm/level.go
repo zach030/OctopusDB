@@ -4,15 +4,16 @@ import (
 	"sort"
 	"sync/atomic"
 
+	file2 "github.com/zach030/OctopusDB/kv/file"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/log"
-	"github.com/zach030/OctopusDB/internal/kv/file"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 type LevelManager struct {
 	lsm           *LSM
-	manifestFile  *file.ManifestFile // 记录level信息
+	manifestFile  *file2.ManifestFile // 记录level信息
 	cfg           *Config
 	levels        []*levelHandler // 对每个level操作的handler
 	cache         *cache          // 缓存
@@ -38,7 +39,7 @@ func (l *LSM) initLevelManager(cfg *Config) *LevelManager {
 }
 
 func (l *LevelManager) loadManifest() error {
-	mf, err := file.OpenManifestFile(&file.Option{Dir: l.lsm.cfg.WorkDir})
+	mf, err := file2.OpenManifestFile(&file2.Option{Dir: l.lsm.cfg.WorkDir})
 	if err != nil {
 		return err
 	}
@@ -57,7 +58,7 @@ func (l *LevelManager) build() error {
 	}
 	// 从manifest中获取数据来构建
 	manifest := l.manifestFile.Manifest()
-	if err := l.manifestFile.FilterValidTables(utils.LoadIDMap(l.cfg.WorkDir)); err != nil {
+	if err := l.manifestFile.FilterValidTables(utils2.LoadIDMap(l.cfg.WorkDir)); err != nil {
 		return err
 	}
 	l.cache = NewCache(l.cfg)
@@ -66,7 +67,7 @@ func (l *LevelManager) build() error {
 		if tid > maxFd {
 			maxFd = tid
 		}
-		filename := utils.SSTFullFileName(l.cfg.WorkDir, tid)
+		filename := utils2.SSTFullFileName(l.cfg.WorkDir, tid)
 		t := openTable(l, filename, nil)
 		l.levels[tableManifest.Level].tables = append(l.levels[tableManifest.Level].tables, t)
 	}
@@ -81,7 +82,7 @@ func (l *LevelManager) build() error {
 func (l *LevelManager) flush(immutable *MemTable) error {
 	// 获取fid，构造sst文件名
 	fid := immutable.wal.FID()
-	sstName := utils.SSTFullFileName(l.cfg.WorkDir, fid)
+	sstName := utils2.SSTFullFileName(l.cfg.WorkDir, fid)
 	log.Info("[Flush] immutable file to sst:", sstName)
 	// 构建table-builder
 	builder := newTableBuilder(l.cfg)
@@ -93,7 +94,7 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 	}
 	tbl := openTable(l, sstName, builder)
 	// 更新manifest
-	if err := l.manifestFile.AddTableMeta(0, &file.TableMeta{
+	if err := l.manifestFile.AddTableMeta(0, &file2.TableMeta{
 		ID:       fid,
 		CheckSum: []byte{'m', 'o', 'c', 'k'},
 	}); err != nil {
@@ -105,9 +106,9 @@ func (l *LevelManager) flush(immutable *MemTable) error {
 }
 
 // Get query key in sst files from L0-L7
-func (l *LevelManager) Get(key []byte) (*utils.Entry, error) {
+func (l *LevelManager) Get(key []byte) (*utils2.Entry, error) {
 	var (
-		entry *utils.Entry
+		entry *utils2.Entry
 		err   error
 	)
 	// l0 层查询
@@ -147,10 +148,10 @@ func (h *levelHandler) overlappingTables(_ levelHandlerRLocked, kr keyRange) (in
 	}
 	// 找到与kr有重合的tables索引左右边界
 	left := sort.Search(len(h.tables), func(i int) bool {
-		return utils.CompareKeys(kr.left, h.tables[i].sst.MaxKey()) <= 0
+		return utils2.CompareKeys(kr.left, h.tables[i].sst.MaxKey()) <= 0
 	})
 	right := sort.Search(len(h.tables), func(i int) bool {
-		return utils.CompareKeys(kr.right, h.tables[i].sst.MaxKey()) < 0
+		return utils2.CompareKeys(kr.right, h.tables[i].sst.MaxKey()) < 0
 	})
 	return left, right
 }

@@ -1,6 +1,8 @@
 package lsm
 
-import coreCache "github.com/zach030/OctopusDB/internal/kv/utils/cache"
+import (
+	coreCache "github.com/zach030/OctopusDB/kv/utils/cache"
+)
 
 type cache struct {
 	indexs *coreCache.Cache

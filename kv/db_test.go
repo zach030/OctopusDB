@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/prometheus/common/log"
-
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 var (
@@ -37,7 +37,7 @@ func TestBasicSetGet(t *testing.T) {
 	clearDir()
 	db := Open(opt)
 	defer func() { _ = db.Close() }()
-	e := utils.NewEntry([]byte("key"), []byte("value"))
+	e := utils2.NewEntry([]byte("key"), []byte("value"))
 	en, err := db.Get([]byte("key"))
 	db.Set(e)
 	for i := 0; i < 64; i++ {
@@ -48,10 +48,10 @@ func TestBasicSetGet(t *testing.T) {
 	fmt.Println(string(en.Value), err)
 }
 
-func newRandEntry(sz int) *utils.Entry {
+func newRandEntry(sz int) *utils2.Entry {
 	v := make([]byte, sz)
 	rand.Read(v[:rand.Intn(sz)])
-	e := utils.BuildEntry()
+	e := utils2.BuildEntry()
 	e.Value = v
 	return e
 }
@@ -64,7 +64,7 @@ func TestAPI(t *testing.T) {
 	t.Run("add", func(t *testing.T) {
 		for i := 0; i < 5000; i++ {
 			key, val := fmt.Sprintf("key%d%v", i, time.Now().UnixNano()), fmt.Sprintf("val%d", i)
-			e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
+			e := utils2.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
 			if err := db.Set(e); err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func TestAPI(t *testing.T) {
 	t.Run("search", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			key, val := fmt.Sprintf("key%d", i), fmt.Sprintf("val%d", i)
-			e := utils.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
+			e := utils2.NewEntry([]byte(key), []byte(val)).WithTTL(1000 * time.Second)
 			if err := db.Set(e); err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +156,7 @@ func TestUserInfoQuery(t *testing.T) {
 	defer db.Close()
 	for _, user := range users {
 		val, _ := json.Marshal(user)
-		e := utils.NewEntry([]byte(user.ID), val).WithTTL(1000 * time.Second)
+		e := utils2.NewEntry([]byte(user.ID), val).WithTTL(1000 * time.Second)
 		if err := db.Set(e); err != nil {
 			t.Fatal(err)
 		}

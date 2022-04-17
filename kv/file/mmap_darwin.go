@@ -24,8 +24,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/zach030/OctopusDB/kv/utils/mmap"
+
 	"github.com/pkg/errors"
-	"github.com/zach030/OctopusDB/internal/kv/utils/mmap"
 )
 
 // MmapFile represents an mmapd file and includes both the buffer to the data and the file descriptor.

@@ -6,20 +6,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zach030/OctopusDB/internal/kv/pb"
+	file2 "github.com/zach030/OctopusDB/kv/file"
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
 	"github.com/prometheus/common/log"
 
 	"github.com/pkg/errors"
-
-	"github.com/zach030/OctopusDB/internal/kv/file"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 // table 对应磁盘的sst文件，在内存中的操作集合
 type table struct {
 	manager *LevelManager
-	sst     *file.SSTable
+	sst     *file2.SSTable
 	fid     uint64
 	ref     int32
 }
@@ -36,7 +35,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		t   *table
 		err error
 	)
-	fid := utils.FID(sstName)
+	fid := utils2.FID(sstName)
 	// builder exist, need to flush to disk
 	if builder != nil {
 		if t, err = builder.flush(manager, sstName); err != nil {
@@ -45,7 +44,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		}
 	} else {
 		t = &table{manager: manager, fid: fid}
-		t.sst = file.OpenSSTable(&file.Option{
+		t.sst = file2.OpenSSTable(&file2.Option{
 			FID:      fid,
 			FileName: sstName,
 			Dir:      manager.cfg.WorkDir,
@@ -59,7 +58,7 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 		return nil
 	}
 	// 获取sst的最大key 需要使用迭代器
-	itr := t.NewIterator(&utils.Options{IsAsc: true}) // 默认是降序
+	itr := t.NewIterator(&utils2.Options{IsAsc: true}) // 默认是降序
 	defer itr.Close()
 	// 定位到初始位置就是最大的key
 	itr.Rewind()
@@ -72,27 +71,27 @@ func openTable(manager *LevelManager, sstName string, builder *tableBuilder) *ta
 }
 
 // Search 在table内查找key所对应的entry
-func (t *table) Search(key []byte, maxVersion *uint64) (*utils.Entry, error) {
+func (t *table) Search(key []byte, maxVersion *uint64) (*utils2.Entry, error) {
 	t.IncrRef()
 	defer t.DecrRef()
-	bloomFilter := utils.BloomFilter{Filter: key}
+	bloomFilter := utils2.BloomFilter{Filter: key}
 	// 1.先走布隆过滤器查
 	if t.sst.HasBloomFilter(); !bloomFilter.MayContain(key) {
 		return nil, errors.New("key not found")
 	}
-	iter := t.NewIterator(&utils.Options{})
+	iter := t.NewIterator(&utils2.Options{})
 	iter.Seek(key)
 	if !iter.Valid() {
-		return nil, utils.ErrKeyNotExist
+		return nil, utils2.ErrKeyNotExist
 	}
 	found := iter.Item().Entry()
-	if utils.IsSameKey(key, found.Key) {
-		if version := utils.ParseTimeStamp(found.Key); *maxVersion < version {
+	if utils2.IsSameKey(key, found.Key) {
+		if version := utils2.ParseTimeStamp(found.Key); *maxVersion < version {
 			*maxVersion = version
 			return found, nil
 		}
 	}
-	return nil, utils.ErrKeyNotExist
+	return nil, utils2.ErrKeyNotExist
 }
 
 // block 根据索引在sst中构建block

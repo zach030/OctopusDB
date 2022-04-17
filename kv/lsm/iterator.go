@@ -5,27 +5,27 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 )
 
 //Iterator  通用的Iterator迭代器
 type Iterator struct {
 	it    Item
-	iters []utils.Iterator // memtable, immemtable, level-manager
+	iters []utils2.Iterator // memtable, immemtable, level-manager
 }
 
 type Item struct {
-	e *utils.Entry
+	e *utils2.Entry
 }
 
-func (it *Item) Entry() *utils.Entry {
+func (it *Item) Entry() *utils2.Entry {
 	return it.e
 }
 
 // NewIterator 创建LSM迭代器
-func (l *LSM) NewIterator(opt *utils.Options) []utils.Iterator {
+func (l *LSM) NewIterator(opt *utils2.Options) []utils2.Iterator {
 	iter := &Iterator{}
-	iter.iters = make([]utils.Iterator, 0)
+	iter.iters = make([]utils2.Iterator, 0)
 	iter.iters = append(iter.iters, l.memTable.NewIterator(opt))
 	for _, imm := range l.imMemTable {
 		iter.iters = append(iter.iters, imm.NewIterator(opt))
@@ -46,7 +46,7 @@ func (iter *Iterator) Rewind() {
 	iter.iters[0].Rewind()
 }
 
-func (iter *Iterator) Item() utils.Item {
+func (iter *Iterator) Item() utils2.Item {
 	return iter.iters[0].Item()
 }
 
@@ -59,10 +59,10 @@ func (iter *Iterator) Seek(key []byte) {
 
 // memIterator 内存表迭代器
 type memIterator struct {
-	innerIter utils.Iterator // 内存表中的迭代器是跳表skiplist
+	innerIter utils2.Iterator // 内存表中的迭代器是跳表skiplist
 }
 
-func (m *MemTable) NewIterator(opt *utils.Options) utils.Iterator {
+func (m *MemTable) NewIterator(opt *utils2.Options) utils2.Iterator {
 	return &memIterator{innerIter: m.skipList.NewSkipListIterator()}
 }
 
@@ -78,7 +78,7 @@ func (iter *memIterator) Rewind() {
 	iter.innerIter.Rewind()
 }
 
-func (iter *memIterator) Item() utils.Item {
+func (iter *memIterator) Item() utils2.Item {
 	return iter.innerIter.Item()
 }
 
@@ -91,11 +91,11 @@ func (iter *memIterator) Seek(key []byte) {
 
 // levelManager上的迭代器
 type levelIterator struct {
-	it    *utils.Item
+	it    *utils2.Item
 	iters []*Iterator
 }
 
-func (l *LevelManager) NewIterator(options *utils.Options) utils.Iterator {
+func (l *LevelManager) NewIterator(options *utils2.Options) utils2.Iterator {
 	return &levelIterator{}
 }
 func (iter *levelIterator) Next() {
@@ -106,7 +106,7 @@ func (iter *levelIterator) Valid() bool {
 func (iter *levelIterator) Rewind() {
 
 }
-func (iter *levelIterator) Item() utils.Item {
+func (iter *levelIterator) Item() utils2.Item {
 	return &Item{}
 }
 func (iter *levelIterator) Close() error {
@@ -119,15 +119,15 @@ func (iter *levelIterator) Seek(key []byte) {
 // ConcatIterator 将table 数组链接成一个迭代器，这样迭代效率更高
 type ConcatIterator struct {
 	idx     int // Which iterator is active now.
-	cur     utils.Iterator
-	iters   []utils.Iterator // Corresponds to tables.
-	tables  []*table         // Disregarding reversed, this is in ascending order.
-	options *utils.Options   // Valid options are REVERSED and NOCACHE.
+	cur     utils2.Iterator
+	iters   []utils2.Iterator // Corresponds to tables.
+	tables  []*table          // Disregarding reversed, this is in ascending order.
+	options *utils2.Options   // Valid options are REVERSED and NOCACHE.
 }
 
 // NewConcatIterator creates a new concatenated iterator
-func NewConcatIterator(tbls []*table, opt *utils.Options) *ConcatIterator {
-	iters := make([]utils.Iterator, len(tbls))
+func NewConcatIterator(tbls []*table, opt *utils2.Options) *ConcatIterator {
+	iters := make([]utils2.Iterator, len(tbls))
 	return &ConcatIterator{
 		options: opt,
 		iters:   iters,
@@ -191,12 +191,12 @@ func (s *ConcatIterator) Seek(key []byte) {
 	var idx int
 	if s.options.IsAsc {
 		idx = sort.Search(len(s.tables), func(i int) bool {
-			return utils.CompareKeys(s.tables[i].sst.MaxKey(), key) >= 0
+			return utils2.CompareKeys(s.tables[i].sst.MaxKey(), key) >= 0
 		})
 	} else {
 		n := len(s.tables)
 		idx = n - 1 - sort.Search(n, func(i int) bool {
-			return utils.CompareKeys(s.tables[n-1-i].sst.MinKey(), key) <= 0
+			return utils2.CompareKeys(s.tables[n-1-i].sst.MinKey(), key) <= 0
 		})
 	}
 	if idx >= len(s.tables) || idx < 0 {
@@ -209,7 +209,7 @@ func (s *ConcatIterator) Seek(key []byte) {
 	s.cur.Seek(key)
 }
 
-func (s *ConcatIterator) Item() utils.Item {
+func (s *ConcatIterator) Item() utils2.Item {
 	return s.cur.Item()
 }
 
@@ -240,8 +240,8 @@ type MergeIterator struct {
 
 type node struct {
 	valid bool
-	entry *utils.Entry
-	iter  utils.Iterator
+	entry *utils2.Entry
+	iter  utils2.Iterator
 
 	// The two iterators are type asserted from `y.Iterator`, used to inline more function calls.
 	// Calling functions on concrete types is much faster (about 25-30%) than calling the
@@ -250,7 +250,7 @@ type node struct {
 	concat *ConcatIterator
 }
 
-func (n *node) setIterator(iter utils.Iterator) {
+func (n *node) setIterator(iter utils2.Iterator) {
 	n.iter = iter
 	// It's okay if the type assertion below fails and n.merge/n.concat are set to nil.
 	// We handle the nil values of merge and concat in all the methods.
@@ -308,7 +308,7 @@ func (mi *MergeIterator) fix() {
 		mi.swapSmall()
 		return
 	}
-	cmp := utils.CompareKeys(mi.small.entry.Key, mi.bigger().entry.Key)
+	cmp := utils2.CompareKeys(mi.small.entry.Key, mi.bigger().entry.Key)
 	switch {
 	case cmp == 0: // Both the keys are equal.
 		// In case of same keys, move the right iterator ahead.
@@ -396,7 +396,7 @@ func (mi *MergeIterator) Valid() bool {
 }
 
 // Key returns the key associated with the current iterator.
-func (mi *MergeIterator) Item() utils.Item {
+func (mi *MergeIterator) Item() utils2.Item {
 	return mi.small.iter.Item()
 }
 
@@ -411,7 +411,7 @@ func (mi *MergeIterator) Close() error {
 }
 
 // NewMergeIterator creates a merge iterator.
-func NewMergeIterator(iters []utils.Iterator, reverse bool) utils.Iterator {
+func NewMergeIterator(iters []utils2.Iterator, reverse bool) utils2.Iterator {
 	switch len(iters) {
 	case 0:
 		return &Iterator{}
@@ -429,7 +429,7 @@ func NewMergeIterator(iters []utils.Iterator, reverse bool) utils.Iterator {
 	}
 	mid := len(iters) / 2
 	return NewMergeIterator(
-		[]utils.Iterator{
+		[]utils2.Iterator{
 			NewMergeIterator(iters[:mid], reverse),
 			NewMergeIterator(iters[mid:], reverse),
 		}, reverse)

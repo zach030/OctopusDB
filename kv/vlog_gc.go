@@ -8,13 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/zach030/OctopusDB/kv/file"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
-	"github.com/zach030/OctopusDB/internal/kv/file"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/pkg/errors"
 )
 
-func (vlog *valueLog) runGC(discardRatio float64, head *utils.ValuePtr) error {
+func (vlog *valueLog) runGC(discardRatio float64, head *utils2.ValuePtr) error {
 	select {
 	case vlog.garbageCh <- struct{}{}:
 		// Pick a log file for GC.
@@ -26,7 +26,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head *utils.ValuePtr) error {
 		var err error
 		files := vlog.pickLog(head)
 		if len(files) == 0 {
-			return utils.ErrNoRewrite
+			return utils2.ErrNoRewrite
 		}
 		tried := make(map[uint32]bool)
 		for _, lf := range files {
@@ -41,7 +41,7 @@ func (vlog *valueLog) runGC(discardRatio float64, head *utils.ValuePtr) error {
 		}
 		return err
 	default:
-		return utils.ErrRejected
+		return utils2.ErrRejected
 	}
 }
 
@@ -80,11 +80,11 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 		panic(fmt.Errorf("fid to move: %d. Current max fid: %d", f.FID, maxFid))
 	}
 
-	wb := make([]*utils.Entry, 0, 1000)
+	wb := make([]*utils2.Entry, 0, 1000)
 	var size int64
 
 	var count, moved int
-	fe := func(e *utils.Entry) error {
+	fe := func(e *utils2.Entry) error {
 		count++
 		if count%100000 == 0 {
 			fmt.Printf("Processing entry %d\n", count)
@@ -94,14 +94,14 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 		if err != nil {
 			return err
 		}
-		if utils.DiscardEntry(e, vs) {
+		if utils2.DiscardEntry(e, vs) {
 			return nil
 		}
 
 		if len(vs.Value) == 0 {
 			return errors.Errorf("Empty value: %+v", vs)
 		}
-		var vp utils.ValuePtr
+		var vp utils2.ValuePtr
 		vp.Decode(vs.Value)
 
 		if vp.Fid > f.FID {
@@ -114,7 +114,7 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 		if vp.Fid == f.FID && vp.Offset == e.Offset {
 			moved++
 			// This new entry only contains the key, and a pointer to the value.
-			ne := new(utils.Entry)
+			ne := new(utils2.Entry)
 			ne.Meta = 0 // Remove all bits. Different keyspace doesn't need these bits.
 			ne.ExpiresAt = e.ExpiresAt
 			ne.Key = append([]byte{}, e.Key...)
@@ -140,7 +140,7 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 		return nil
 	}
 
-	_, err := f.Iterate(0, func(e *utils.Entry, vp *utils.ValuePtr) error {
+	_, err := f.Iterate(0, func(e *utils2.Entry, vp *utils2.ValuePtr) error {
 		return fe(e)
 	})
 	if err != nil {
@@ -152,14 +152,14 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 	for i := 0; i < len(wb); {
 		loops++
 		if batchSize == 0 {
-			return utils.ErrNoRewrite
+			return utils2.ErrNoRewrite
 		}
 		end := i + batchSize
 		if end > len(wb) {
 			end = len(wb)
 		}
 		if err := vlog.db.batchSet(wb[i:end]); err != nil {
-			if err == utils.ErrTxnTooBig {
+			if err == utils2.ErrTxnTooBig {
 				// Decrease the batch size to half.
 				batchSize = batchSize / 2
 				continue
@@ -195,7 +195,7 @@ func (vlog *valueLog) rewrite(f *file.LogFile) error {
 	return nil
 }
 
-func (vlog *valueLog) pickLog(head *utils.ValuePtr) (files []*file.LogFile) {
+func (vlog *valueLog) pickLog(head *utils2.ValuePtr) (files []*file.LogFile) {
 	vlog.filesLock.RLock()
 	defer vlog.filesLock.RUnlock()
 	fids := vlog.sortedFids()
@@ -275,7 +275,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		// Pick a random start point for the log.
 		skipFirstM = float64(rand.Int63n(fileSize)) // Pick a random starting location.
 		skipFirstM -= sizeWindow                    // Avoid hitting EOF by moving back by window.
-		skipFirstM /= float64(utils.Mi)             // Convert to MBs.
+		skipFirstM /= float64(utils2.Mi)            // Convert to MBs.
 	}
 	var skipped float64
 
@@ -283,7 +283,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	start := time.Now()
 	var numIterations int
 	// 重放遍历vlog文件
-	_, err = samp.lf.Iterate(0, func(e *utils.Entry, vp *utils.ValuePtr) error {
+	_, err = samp.lf.Iterate(0, func(e *utils2.Entry, vp *utils2.ValuePtr) error {
 		numIterations++
 		esz := float64(vp.Len) / (1 << 20) // in MBs.
 		if skipped < skipFirstM {
@@ -292,13 +292,13 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		}
 		// Sample until we reach the window sizes or exceed 10 seconds.
 		if r.count > countWindow {
-			return utils.ErrStop
+			return utils2.ErrStop
 		}
 		if r.total > sizeWindowM {
-			return utils.ErrStop
+			return utils2.ErrStop
 		}
 		if time.Since(start) > 10*time.Second {
-			return utils.ErrStop
+			return utils2.ErrStop
 		}
 		r.total += esz
 		r.count++
@@ -307,7 +307,7 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 		if err != nil {
 			return err
 		}
-		if utils.DiscardEntry(e, entry) {
+		if utils2.DiscardEntry(e, entry) {
 			r.discard += esz
 			return nil
 		}
@@ -340,12 +340,12 @@ func (vlog *valueLog) sample(samp *sampler, discardRatio float64) (*reason, erro
 	// and what we can discard is below the threshold, we should skip the rewrite.
 	if (r.count < countWindow && r.total < sizeWindowM*0.75) || r.discard < discardRatio*r.total {
 		fmt.Printf("Skipping GC on fid: %d", samp.lf.FID)
-		return nil, utils.ErrNoRewrite
+		return nil, utils2.ErrNoRewrite
 	}
 	return &r, nil
 }
 
-func (vlog *valueLog) waitOnGC(lc *utils.Closer) {
+func (vlog *valueLog) waitOnGC(lc *utils2.Closer) {
 	defer lc.Done()
 
 	<-lc.CloseSignal // Wait for lc to be closed.

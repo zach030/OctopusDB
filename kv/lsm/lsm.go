@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/prometheus/common/log"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/prometheus/common/log"
 )
 
 type LSM struct {
@@ -16,7 +16,7 @@ type LSM struct {
 	imMemTable []*MemTable
 	cfg        *Config
 	levels     *LevelManager
-	closer     *utils.Closer
+	closer     *utils2.Closer
 	maxMemFd   uint64
 }
 
@@ -44,7 +44,7 @@ func NewLSM(cfg *Config) *LSM {
 	lsm.levels = lsm.initLevelManager(cfg)
 	lsm.memTable, lsm.imMemTable = lsm.recover()
 	// 初始化closer 用于资源回收的信号控制
-	lsm.closer = utils.NewCloser()
+	lsm.closer = utils2.NewCloser()
 	return lsm
 }
 
@@ -69,9 +69,9 @@ func (l *LSM) Close() error {
 	return nil
 }
 
-func (l *LSM) Set(entry *utils.Entry) error {
+func (l *LSM) Set(entry *utils2.Entry) error {
 	if entry == nil || len(entry.Key) == 0 {
-		return utils.ErrEmptyKey
+		return utils2.ErrEmptyKey
 	}
 	// 优雅关闭
 	l.closer.Add(1)
@@ -79,7 +79,7 @@ func (l *LSM) Set(entry *utils.Entry) error {
 	// 检查当前memtable是否写满，是的话创建新的memtable,并将当前内存表写到immutables中
 	// 否则写入当前memtable中
 	if int64(l.memTable.wal.Size())+
-		int64(utils.EstimateWalCodecSize(entry)) > l.cfg.MemTableSize {
+		int64(utils2.EstimateWalCodecSize(entry)) > l.cfg.MemTableSize {
 		l.Rotate()
 	}
 	if err := l.memTable.Set(entry); err != nil {
@@ -98,15 +98,15 @@ func (l *LSM) Set(entry *utils.Entry) error {
 	return nil
 }
 
-func (l *LSM) Get(key []byte) (*utils.Entry, error) {
+func (l *LSM) Get(key []byte) (*utils2.Entry, error) {
 	if len(key) == 0 {
-		return nil, utils.ErrEmptyKey
+		return nil, utils2.ErrEmptyKey
 	}
 	l.closer.Add(1)
 	defer l.closer.Done()
 	// 先查mt
 	var (
-		entry *utils.Entry
+		entry *utils2.Entry
 		err   error
 	)
 	if entry, err = l.memTable.Get(key); entry != nil && entry.Value != nil {

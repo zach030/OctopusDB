@@ -11,11 +11,10 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/pkg/errors"
-
-	"github.com/zach030/OctopusDB/internal/kv/pb"
-
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 type ManifestFile struct {
@@ -52,7 +51,7 @@ type (
 // OpenManifestFile 打开manifest文件
 func OpenManifestFile(opt *Option) (*ManifestFile, error) {
 	mf := &ManifestFile{option: opt}
-	path := filepath.Join(opt.Dir, utils.ManifestFileName)
+	path := filepath.Join(opt.Dir, utils2.ManifestFileName)
 	// 打开路径下的manifest文件
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -121,14 +120,14 @@ func newCreateModify(id uint64, level int, checksum []byte) *pb.ManifestModify {
 
 // RewriteManifest 覆盖写manifest文件
 func RewriteManifest(dir string, m *Manifest) (*os.File, int, error) {
-	f, err := os.OpenFile(filepath.Join(dir, utils.ReManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	f, err := os.OpenFile(filepath.Join(dir, utils2.ReManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, 0, err
 	}
 	buf := make([]byte, 8)
 	// magic-num | version
-	copy(buf[0:4], utils.MagicText[:])
-	binary.BigEndian.PutUint32(buf[4:8], utils.MagicVersion)
+	copy(buf[0:4], utils2.MagicText[:])
+	binary.BigEndian.PutUint32(buf[4:8], utils2.MagicVersion)
 	modifies := pb.ManifestModifies{Modifies: m.GetModifies()}
 	modifyBuf, err := modifies.Marshal()
 	if err != nil {
@@ -139,7 +138,7 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, int, error) {
 	var crcBuf [8]byte
 	// length of modify | crc
 	binary.BigEndian.PutUint32(crcBuf[0:4], uint32(len(modifyBuf)))
-	binary.BigEndian.PutUint32(crcBuf[4:8], crc32.Checksum(modifyBuf, utils.CastagnoliCrcTable))
+	binary.BigEndian.PutUint32(crcBuf[4:8], crc32.Checksum(modifyBuf, utils2.CastagnoliCrcTable))
 	buf = append(buf, crcBuf[:]...)
 	buf = append(buf, modifyBuf...)
 	if _, err := f.Write(buf); err != nil {
@@ -155,10 +154,10 @@ func RewriteManifest(dir string, m *Manifest) (*os.File, int, error) {
 	if err = f.Close(); err != nil {
 		return nil, 0, err
 	}
-	if err = os.Rename(filepath.Join(dir, utils.ReManifestFileName), filepath.Join(dir, utils.ManifestFileName)); err != nil {
+	if err = os.Rename(filepath.Join(dir, utils2.ReManifestFileName), filepath.Join(dir, utils2.ManifestFileName)); err != nil {
 		return nil, 0, err
 	}
-	fp, err := os.OpenFile(filepath.Join(dir, utils.ManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	fp, err := os.OpenFile(filepath.Join(dir, utils2.ManifestFileName), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		fp.Close()
 		return nil, 0, err
@@ -180,10 +179,10 @@ func ReplayManifest(f *os.File) (*Manifest, int64, error) {
 	if _, err := reader.Read(magicBuf[:]); err != nil {
 		return &Manifest{}, 0, err
 	}
-	if !bytes.Equal(magicBuf[0:4], utils.MagicText[:]) {
+	if !bytes.Equal(magicBuf[0:4], utils2.MagicText[:]) {
 		return &Manifest{}, 0, errors.New("incorrect magic version")
 	}
-	if v := binary.BigEndian.Uint32(magicBuf[4:8]); v != utils.MagicVersion {
+	if v := binary.BigEndian.Uint32(magicBuf[4:8]); v != utils2.MagicVersion {
 		return &Manifest{}, 0, errors.New("incorrect version")
 	}
 	var offset = int64(8)
@@ -207,7 +206,7 @@ func ReplayManifest(f *os.File) (*Manifest, int64, error) {
 			return &Manifest{}, 0, err
 		}
 		offset += int64(lengthOfChange)
-		if crc32.Checksum(change, utils.CastagnoliCrcTable) != crc {
+		if crc32.Checksum(change, utils2.CastagnoliCrcTable) != crc {
 			return &Manifest{}, 0, errors.New("invalid crc")
 		}
 		var changes pb.ManifestModifies
@@ -234,7 +233,7 @@ func (f *ManifestFile) FilterValidTables(ids map[uint64]struct{}) error {
 	for id := range ids {
 		if _, ok := f.manifest.Tables[id]; !ok {
 			// need to delete
-			fname := utils.SSTFullFileName(f.option.Dir, id)
+			fname := utils2.SSTFullFileName(f.option.Dir, id)
 			if err := os.Remove(fname); err != nil {
 				return err
 			}
@@ -271,8 +270,8 @@ func (m *Manifest) applyModify(modify *pb.ManifestModify) error {
 		if _, ok := m.Tables[modify.Id]; !ok {
 			return errors.Errorf("not found table")
 		}
-		delete(m.Tables, modify.Id)
 		delete(m.Levels[modify.Level].Tables, modify.Id)
+		delete(m.Tables, modify.Id)
 		m.Deletions++
 	default:
 		return errors.Errorf("invalid modify type")
@@ -306,15 +305,15 @@ func (f *ManifestFile) addChanges(changesParam []*pb.ManifestModify) error {
 		return err
 	}
 	// Rewrite manifest if it'd shrink by 1/10 and it's big enough to care
-	if f.manifest.Deletions > utils.ManifestDeletionsRewriteThreshold &&
-		f.manifest.Deletions > utils.ManifestDeletionsRatio*(f.manifest.Creations-f.manifest.Deletions) {
+	if f.manifest.Deletions > utils2.ManifestDeletionsRewriteThreshold &&
+		f.manifest.Deletions > utils2.ManifestDeletionsRatio*(f.manifest.Creations-f.manifest.Deletions) {
 		if err := f.rewrite(); err != nil {
 			return err
 		}
 	} else {
 		var lenCrcBuf [8]byte
 		binary.BigEndian.PutUint32(lenCrcBuf[0:4], uint32(len(buf)))
-		binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(buf, utils.CastagnoliCrcTable))
+		binary.BigEndian.PutUint32(lenCrcBuf[4:8], crc32.Checksum(buf, utils2.CastagnoliCrcTable))
 		buf = append(lenCrcBuf[:], buf...)
 		if _, err := f.f.Write(buf); err != nil {
 			return err

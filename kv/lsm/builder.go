@@ -5,15 +5,13 @@ import (
 	"os"
 	"unsafe"
 
+	file2 "github.com/zach030/OctopusDB/kv/file"
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/prometheus/common/log"
 
-	"github.com/zach030/OctopusDB/internal/kv/file"
-
-	"github.com/zach030/OctopusDB/internal/kv/pb"
-
 	"github.com/pkg/errors"
-
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 type tableBuilder struct {
@@ -54,17 +52,17 @@ type block struct {
 // | entry1-offset | entry2-offset | ...... | length of entryOffsets | checksum | length of checksum |
 func (b *block) Decode() error {
 	pos := len(b.data) - 4
-	b.chkLen = int(utils.BytesToU32(b.data[pos : pos+4]))
+	b.chkLen = int(utils2.BytesToU32(b.data[pos : pos+4]))
 	pos -= b.chkLen
 	b.checksum = b.data[pos : pos+b.chkLen]
 	pos -= 4
-	NumOfEntries := int(utils.BytesToU32(b.data[pos : pos+4]))
+	NumOfEntries := int(utils2.BytesToU32(b.data[pos : pos+4]))
 	b.entriesIndexStart = pos - (NumOfEntries * 4)
 	entriesEndOffset := b.entriesIndexStart + NumOfEntries*4
-	b.entryOffsets = utils.BytesToU32Slice(b.data[b.entriesIndexStart:entriesEndOffset])
+	b.entryOffsets = utils2.BytesToU32Slice(b.data[b.entriesIndexStart:entriesEndOffset])
 	// todo 为什么pos+4，numsOfEntries也算data吗
 	b.data = b.data[:pos+4]
-	if err := utils.VerifyChecksum(b.data, b.checksum); err != nil {
+	if err := utils2.VerifyChecksum(b.data, b.checksum); err != nil {
 		return err
 	}
 	return nil
@@ -120,20 +118,20 @@ func (tb *tableBuilder) Close() {
 }
 
 // AddStaleKey 记录陈旧key所占用的空间大小，用于日志压缩时的决策
-func (tb *tableBuilder) AddStaleKey(e *utils.Entry) {
+func (tb *tableBuilder) AddStaleKey(e *utils2.Entry) {
 	// Rough estimate based on how much space it will occupy in the SST.
 	tb.staleDataSize += len(e.Key) + len(e.Value) + 4 /* entry offset */ + 4 /* header size */
 	tb.add(e, true)
 }
 
 // AddKey _
-func (tb *tableBuilder) AddKey(e *utils.Entry) {
+func (tb *tableBuilder) AddKey(e *utils2.Entry) {
 	tb.add(e, false)
 }
 
-func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
+func (tb *tableBuilder) add(e *utils2.Entry, isStale bool) {
 	key := e.Key
-	val := utils.ValueStruct{Value: e.Value, ExpiresAt: e.ExpiresAt, Meta: e.Meta}
+	val := utils2.ValueStruct{Value: e.Value, ExpiresAt: e.ExpiresAt, Meta: e.Meta}
 	// add current entry, try to allocate new block
 	if tb.tryFinishBlock(e) {
 		if isStale {
@@ -147,8 +145,8 @@ func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 		}
 	}
 	// try to allocate a block: modify curr block
-	tb.keyHashes = append(tb.keyHashes, utils.Hash(utils.ParseKey(key)))
-	if version := utils.ParseTimeStamp(key); version > tb.maxVersion {
+	tb.keyHashes = append(tb.keyHashes, utils2.Hash(utils2.ParseKey(key)))
+	if version := utils2.ParseTimeStamp(key); version > tb.maxVersion {
 		tb.maxVersion = version
 	}
 	var diffKey []byte
@@ -180,9 +178,9 @@ func (tb *tableBuilder) add(e *utils.Entry, isStale bool) {
 func (tb *tableBuilder) flush(lm *LevelManager, tableName string) (tbl *table, err error) {
 	log.Info("[Table builder] flush table :", tableName)
 	bd := tb.done()
-	tbl = &table{manager: lm, fid: utils.FID(tableName)}
-	tbl.sst = file.OpenSSTable(&file.Option{
-		FID:      utils.FID(tableName),
+	tbl = &table{manager: lm, fid: utils2.FID(tableName)}
+	tbl.sst = file2.OpenSSTable(&file2.Option{
+		FID:      utils2.FID(tableName),
 		FileName: tableName,
 		Dir:      lm.cfg.WorkDir,
 		Flag:     os.O_CREATE | os.O_RDWR,
@@ -245,7 +243,7 @@ func (tb *tableBuilder) append(data []byte) {
 }
 
 // tryFinishBlock if current block is full
-func (tb *tableBuilder) tryFinishBlock(e *utils.Entry) bool {
+func (tb *tableBuilder) tryFinishBlock(e *utils2.Entry) bool {
 	if tb.curBlock == nil {
 		return true
 	}
@@ -274,8 +272,8 @@ func (tb *tableBuilder) tryFinishBlock(e *utils.Entry) bool {
 }
 
 func (tb *tableBuilder) calculateChecksum(data []byte) []byte {
-	checkSum := utils.CalculateChecksum(data)
-	return utils.U64ToBytes(checkSum)
+	checkSum := utils2.CalculateChecksum(data)
+	return utils2.U64ToBytes(checkSum)
 }
 
 // finishBlock finish a block to sst
@@ -287,13 +285,13 @@ func (tb *tableBuilder) finishBlock() {
 	// Append the entryOffsets and its length.
 	// | entry1-offset | entry2-offset | ...... | length of entryOffsets | checksum | length of checksum |
 	// block encode
-	tb.append(utils.U32SliceToBytes(tb.curBlock.entryOffsets))
-	log.Infof("builder collect data for length of entries now, content is:%v", utils.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
-	tb.append(utils.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
+	tb.append(utils2.U32SliceToBytes(tb.curBlock.entryOffsets))
+	log.Infof("builder collect data for length of entries now, content is:%v", utils2.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
+	tb.append(utils2.U32ToBytes(uint32(len(tb.curBlock.entryOffsets))))
 	checksum := tb.calculateChecksum(tb.curBlock.data[:tb.curBlock.end])
 	// Append the block checksum and its length.
 	tb.append(checksum)
-	tb.append(utils.U32ToBytes(uint32(len(checksum))))
+	tb.append(utils2.U32ToBytes(uint32(len(checksum))))
 
 	tb.estimateSz += tb.curBlock.estimateSz
 	tb.blockList = append(tb.blockList, tb.curBlock)
@@ -312,10 +310,10 @@ func (bd *buildData) Copy(dst []byte) int {
 	}
 	// 2. copy blocks index
 	written += copy(dst[written:], bd.index)
-	written += copy(dst[written:], utils.U32ToBytes(uint32(len(bd.index))))
+	written += copy(dst[written:], utils2.U32ToBytes(uint32(len(bd.index))))
 	// 2. copy checksum
 	written += copy(dst[written:], bd.checksum)
-	written += copy(dst[written:], utils.U32ToBytes(uint32(len(bd.checksum))))
+	written += copy(dst[written:], utils2.U32ToBytes(uint32(len(bd.checksum))))
 	return written
 }
 
@@ -329,11 +327,11 @@ func (tb *tableBuilder) done() buildData {
 	bd := buildData{
 		blockList: tb.blockList,
 	}
-	var f utils.BloomFilter
+	var f utils2.BloomFilter
 	// has bloom filter
 	if tb.cfg.BloomFalsePositive > 0 {
-		bits := utils.BitsPerKey(len(tb.keyHashes), tb.cfg.BloomFalsePositive)
-		f = utils.NewBloomFilter(tb.keyHashes, bits)
+		bits := utils2.BitsPerKey(len(tb.keyHashes), tb.cfg.BloomFalsePositive)
+		f = utils2.NewBloomFilter(tb.keyHashes, bits)
 	}
 	// get blocks index and data size by filter
 	// table offset: | base-key , start-offset, len |

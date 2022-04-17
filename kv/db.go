@@ -8,19 +8,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zach030/OctopusDB/kv/lsm"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
+
 	"github.com/prometheus/common/log"
 
 	"github.com/pkg/errors"
-
-	"github.com/zach030/OctopusDB/internal/kv/lsm"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
 )
 
 type Engine interface {
-	Set(data *utils.Entry) error
-	Get(key []byte) (*utils.Entry, error)
+	Set(data *utils2.Entry) error
+	Get(key []byte) (*utils2.Entry, error)
 	Del(key []byte) error
-	NewIterator(opt *utils.Options) utils.Iterator
+	NewIterator(opt *utils2.Options) utils2.Iterator
 	Info() *stat
 	Close() error
 }
@@ -34,12 +34,12 @@ type OctopusDB struct {
 	flushChan   chan flushTask // For flushing memtables.
 	writeCh     chan *request
 	blockWrites int32
-	vhead       *utils.ValuePtr // vlog同步数据截断点
+	vhead       *utils2.ValuePtr // vlog同步数据截断点
 	logRotates  int32
 }
 
 func Open(opt *Options) *OctopusDB {
-	c := utils.NewCloser()
+	c := utils2.NewCloser()
 	db := &OctopusDB{opt: opt}
 	// todo 目录锁
 	db.InitVlog()
@@ -59,7 +59,7 @@ func Open(opt *Options) *OctopusDB {
 		DiscardStatsCh:      &(db.vlog.lfDiscardStats.flushChan),
 	})
 	db.stat = newStat()
-	//go db.lsm.StartCompaction()
+	go db.lsm.StartCompaction()
 	c.Add(1)
 	db.writeCh = make(chan *request)
 	db.flushChan = make(chan flushTask, 16)
@@ -68,57 +68,57 @@ func Open(opt *Options) *OctopusDB {
 	return db
 }
 
-func (o *OctopusDB) Set(data *utils.Entry) error {
+func (o *OctopusDB) Set(data *utils2.Entry) error {
 	if data == nil || len(data.Key) == 0 {
-		return utils.ErrEmptyKey
+		return utils2.ErrEmptyKey
 	}
 	// 1. 判断value大小
-	var vp *utils.ValuePtr
+	var vp *utils2.ValuePtr
 	var err error
-	data.Key = utils.KeyWithTs(data.Key, math.MaxUint32)
+	data.Key = utils2.KeyWithTs(data.Key, math.MaxUint32)
 	if !o.shouldWriteValueToLSM(data) {
 		if vp, err = o.vlog.newValuePtr(data); err != nil {
 			return err
 		}
-		data.Meta |= utils.BitValuePointer
+		data.Meta |= utils2.BitValuePointer
 		data.Value = vp.Encode()
 	}
 	return o.lsm.Set(data)
 }
 
-func (o *OctopusDB) Get(key []byte) (*utils.Entry, error) {
+func (o *OctopusDB) Get(key []byte) (*utils2.Entry, error) {
 	if len(key) == 0 {
-		return nil, utils.ErrEmptyKey
+		return nil, utils2.ErrEmptyKey
 	}
 	var (
-		entry *utils.Entry
+		entry *utils2.Entry
 		err   error
 	)
 	// 1. 先从lsm拿key
 	// 2. 如果存了vlog，再取value
-	key = utils.KeyWithTs(key, math.MaxUint32)
+	key = utils2.KeyWithTs(key, math.MaxUint32)
 	if entry, err = o.lsm.Get(key); err != nil {
 		return entry, err
 	}
 	// 3. 判断是否存vlog
-	if entry != nil && utils.IsValuePtr(entry) {
-		var vp utils.ValuePtr
+	if entry != nil && utils2.IsValuePtr(entry) {
+		var vp utils2.ValuePtr
 		vp.Decode(entry.Value)
 		buf, cb, err := o.vlog.read(&vp)
-		defer utils.RunCallBack(cb)
+		defer utils2.RunCallBack(cb)
 		if err != nil {
 			return nil, err
 		}
-		entry.Value = utils.SafeCopy(nil, buf)
+		entry.Value = utils2.SafeCopy(nil, buf)
 	}
 	if isDeletedOrExpired(entry) {
-		return nil, utils.ErrKeyNotFound
+		return nil, utils2.ErrKeyNotFound
 	}
 	return entry, nil
 }
 
 // 判断是否过期 是可删除
-func isDeletedOrExpired(e *utils.Entry) bool {
+func isDeletedOrExpired(e *utils2.Entry) bool {
 	if e.Value == nil {
 		return true
 	}
@@ -130,7 +130,7 @@ func isDeletedOrExpired(e *utils.Entry) bool {
 }
 
 func (o *OctopusDB) Del(key []byte) error {
-	return o.Set(&utils.Entry{
+	return o.Set(&utils2.Entry{
 		Key:       key,
 		Value:     nil,
 		ExpiresAt: 0,
@@ -158,14 +158,14 @@ func (o *OctopusDB) Close() error {
 // RunValueLogGC triggers a value log garbage collection.
 func (o *OctopusDB) RunValueLogGC(discardRatio float64) error {
 	if discardRatio >= 1.0 || discardRatio <= 0.0 {
-		return utils.ErrInvalidRequest
+		return utils2.ErrInvalidRequest
 	}
 	// Find head on disk
-	headKey := utils.KeyWithTs(head, math.MaxUint64)
+	headKey := utils2.KeyWithTs(head, math.MaxUint64)
 	val, err := o.lsm.Get(headKey)
 	if err != nil {
-		if err == utils.ErrKeyNotFound {
-			val = &utils.Entry{
+		if err == utils2.ErrKeyNotFound {
+			val = &utils2.Entry{
 				Key:   headKey,
 				Value: []byte{},
 			}
@@ -175,7 +175,7 @@ func (o *OctopusDB) RunValueLogGC(discardRatio float64) error {
 	}
 
 	// 内部key head 一定是value ptr 不需要检查内容
-	var head utils.ValuePtr
+	var head utils2.ValuePtr
 	if len(val.Value) > 0 {
 		head.Decode(val.Value)
 	}
@@ -184,13 +184,13 @@ func (o *OctopusDB) RunValueLogGC(discardRatio float64) error {
 	return o.vlog.runGC(discardRatio, &head)
 }
 
-func (o *OctopusDB) shouldWriteValueToLSM(e *utils.Entry) bool {
+func (o *OctopusDB) shouldWriteValueToLSM(e *utils2.Entry) bool {
 	return int64(len(e.Value)) < o.opt.ValueThreshold
 }
 
-func (o *OctopusDB) sendToWriteCh(entries []*utils.Entry) (*request, error) {
+func (o *OctopusDB) sendToWriteCh(entries []*utils2.Entry) (*request, error) {
 	if atomic.LoadInt32(&o.blockWrites) == 1 {
-		return nil, utils.ErrBlockedWrites
+		return nil, utils2.ErrBlockedWrites
 	}
 	var count, size int64
 	for _, e := range entries {
@@ -198,7 +198,7 @@ func (o *OctopusDB) sendToWriteCh(entries []*utils.Entry) (*request, error) {
 		count++
 	}
 	if count >= o.opt.MaxBatchCount || size >= o.opt.MaxBatchSize {
-		return nil, utils.ErrTxnTooBig
+		return nil, utils2.ErrTxnTooBig
 	}
 
 	// TODO 尝试使用对象复用，后面entry对象也应该使用
@@ -212,7 +212,7 @@ func (o *OctopusDB) sendToWriteCh(entries []*utils.Entry) (*request, error) {
 }
 
 //   Check(kv.BatchSet(entries))
-func (o *OctopusDB) batchSet(entries []*utils.Entry) error {
+func (o *OctopusDB) batchSet(entries []*utils2.Entry) error {
 	req, err := o.sendToWriteCh(entries)
 	if err != nil {
 		return err
@@ -221,7 +221,7 @@ func (o *OctopusDB) batchSet(entries []*utils.Entry) error {
 	return req.Wait()
 }
 
-func (o *OctopusDB) doWrites(lc *utils.Closer) {
+func (o *OctopusDB) doWrites(lc *utils2.Closer) {
 	defer lc.Done()
 	pendingCh := make(chan struct{}, 1)
 
@@ -248,7 +248,7 @@ func (o *OctopusDB) doWrites(lc *utils.Closer) {
 			reqs = append(reqs, r)
 			reqLen.Set(int64(len(reqs)))
 
-			if len(reqs) >= 3*utils.KVWriteChCapacity {
+			if len(reqs) >= 3*utils2.KVWriteChCapacity {
 				pendingCh <- struct{}{} // blocking.
 				goto writeCase
 			}
@@ -329,9 +329,9 @@ func (o *OctopusDB) writeToLSM(b *request) error {
 
 	for i, entry := range b.Entries {
 		if o.shouldWriteValueToLSM(entry) { // Will include deletion / tombstone case.
-			entry.Meta = entry.Meta &^ utils.BitValuePointer
+			entry.Meta = entry.Meta &^ utils2.BitValuePointer
 		} else {
-			entry.Meta = entry.Meta | utils.BitValuePointer
+			entry.Meta = entry.Meta | utils2.BitValuePointer
 			entry.Value = b.Ptrs[i].Encode()
 		}
 		o.lsm.Set(entry)
@@ -341,8 +341,8 @@ func (o *OctopusDB) writeToLSM(b *request) error {
 
 // 结构体
 type flushTask struct {
-	mt           *utils.SkipList
-	vptr         *utils.ValuePtr
+	mt           *utils2.SkipList
+	vptr         *utils2.ValuePtr
 	dropPrefixes [][]byte
 }
 
@@ -357,8 +357,8 @@ func (o *OctopusDB) pushHead(ft flushTask) error {
 
 	// Pick the max commit ts, so in case of crash, our read ts would be higher than all the
 	// commits.
-	headTs := utils.KeyWithTs(head, uint64(time.Now().Unix()/1e9))
-	ft.mt.Add(&utils.Entry{
+	headTs := utils2.KeyWithTs(head, uint64(time.Now().Unix()/1e9))
+	ft.mt.Add(&utils2.Entry{
 		Key:   headTs,
 		Value: val,
 	})

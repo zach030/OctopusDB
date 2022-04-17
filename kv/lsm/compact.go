@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/common/log"
-	"github.com/zach030/OctopusDB/internal/kv/pb"
+	"github.com/zach030/OctopusDB/kv/pb"
+	utils2 "github.com/zach030/OctopusDB/kv/utils"
 
 	"github.com/pkg/errors"
-	"github.com/zach030/OctopusDB/internal/kv/utils"
+	"github.com/prometheus/common/log"
 )
 
 type compactionPriority struct {
@@ -112,7 +112,7 @@ func (l *LevelManager) run(id int, p compactionPriority) bool {
 	switch err {
 	case nil:
 		return true
-	case utils.ErrFillTables:
+	case utils2.ErrFillTables:
 		// 什么也不做，此时合并过程被忽略
 	default:
 		log.Infof("[taskID:%d] While running doCompact: %v\n ", id, err)
@@ -142,7 +142,7 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 		// 从l0--l-base层的压缩
 		cd.nextLevel = l.levels[p.t.baseLevel]
 		if !l.compactTablesFromL0(&cd) {
-			return utils.ErrFillTables
+			return utils2.ErrFillTables
 		}
 	} else {
 		cd.nextLevel = cd.thisLevel
@@ -150,7 +150,7 @@ func (l *LevelManager) doCompact(id int, p compactionPriority) error {
 			cd.nextLevel = l.levels[level+1]
 		}
 		if !l.compactTables(&cd) {
-			return utils.ErrFillTables
+			return utils2.ErrFillTables
 		}
 	}
 	// 完成合并后 从合并状态中删除
@@ -195,7 +195,7 @@ func (l *LevelManager) runCompactDef(id, level int, cd compactDef) (err error) {
 		}
 	}()
 	// 更新manifest
-	modifies := l.addManifestModifySet(&cd, newTbls)
+	modifies := addManifestModifySet(&cd, newTbls)
 	if err := l.manifestFile.AddChanges(modifies.Modifies); err != nil {
 		return err
 	}
@@ -239,19 +239,19 @@ func tablesToString(tables []*table) []string {
 func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, func() error, error) {
 	topTables := cd.top
 	botTables := cd.bottom
-	iterOpt := &utils.Options{
+	iterOpt := &utils2.Options{
 		IsAsc: true,
 	}
 	//numTables := int64(len(topTables) + len(botTables))
 
-	newIterator := func() []utils.Iterator {
+	newIterator := func() []utils2.Iterator {
 		// Create iterators across all the tables involved first.
-		var iters []utils.Iterator
+		var iters []utils2.Iterator
 		switch {
 		case lev == 0:
 			iters = append(iters, reversedIterators(topTables, iterOpt)...)
 		case len(topTables) > 0:
-			iters = []utils.Iterator{topTables[0].NewIterator(iterOpt)}
+			iters = []utils2.Iterator{topTables[0].NewIterator(iterOpt)}
 		}
 		return append(iters, NewConcatIterator(botTables, iterOpt))
 	}
@@ -259,7 +259,7 @@ func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, fun
 	// 开始并行执行压缩过程，流式处理提高效率
 	res := make(chan *table, 3)
 	// 限定并发协程数为split+8
-	inflightBuilders := utils.NewThrottle(8 + len(cd.splits))
+	inflightBuilders := utils2.NewThrottle(8 + len(cd.splits))
 	for _, kr := range cd.splits {
 		// Initiate Do here so we can register the goroutines for buildTables too.
 		if err := inflightBuilders.Do(); err != nil {
@@ -296,7 +296,7 @@ func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, fun
 
 	if err == nil {
 		// 同步刷盘，保证数据一定落盘
-		err = utils.SyncDir(l.cfg.WorkDir)
+		err = utils2.SyncDir(l.cfg.WorkDir)
 	}
 
 	if err != nil {
@@ -306,7 +306,7 @@ func (l *LevelManager) compactBuildTables(lev int, cd compactDef) ([]*table, fun
 	}
 
 	sort.Slice(newTables, func(i, j int) bool {
-		return utils.CompareKeys(newTables[i].sst.MaxKey(), newTables[j].sst.MaxKey()) < 0
+		return utils2.CompareKeys(newTables[i].sst.MaxKey(), newTables[j].sst.MaxKey()) < 0
 	})
 	return newTables, func() error { return decrRefs(newTables) }, nil
 }
@@ -319,16 +319,16 @@ func (l *LevelManager) updateDiscardStats(discardStats map[uint32]int64) {
 }
 
 // 真正执行并行压缩的子压缩文件
-func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef, inflightBuilders *utils.Throttle, res chan<- *table) {
+func (l *LevelManager) subcompact(it utils2.Iterator, kr keyRange, cd compactDef, inflightBuilders *utils2.Throttle, res chan<- *table) {
 	var lastKey []byte
 	// 更新 discardStats
 	discardStats := make(map[uint32]int64)
 	defer func() {
 		l.updateDiscardStats(discardStats)
 	}()
-	updateStats := func(e *utils.Entry) {
-		if e.Meta&utils.BitValuePointer > 0 {
-			var vp utils.ValuePtr
+	updateStats := func(e *utils2.Entry) {
+		if e.Meta&utils2.BitValuePointer > 0 {
+			var vp utils2.ValuePtr
 			vp.Decode(e.Value)
 			discardStats[vp.Fid] += int64(vp.Len)
 		}
@@ -339,9 +339,9 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 			key := it.Item().Entry().Key
 			//version := utils.ParseTs(key)
 			isExpired := isDeletedOrExpired(0, it.Item().Entry().ExpiresAt)
-			if !utils.IsSameKey(key, lastKey) {
+			if !utils2.IsSameKey(key, lastKey) {
 				// 如果迭代器返回的key大于当前key的范围就不用执行了
-				if len(kr.right) > 0 && utils.CompareKeys(key, kr.right) >= 0 {
+				if len(kr.right) > 0 && utils2.CompareKeys(key, kr.right) >= 0 {
 					break
 				}
 				if builder.ReachedCapacity() {
@@ -349,11 +349,11 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 					break
 				}
 				// 把当前的key变为 lastKey
-				lastKey = utils.SafeCopy(lastKey, key)
+				lastKey = utils2.SafeCopy(lastKey, key)
 				//umVersions = 0
 				// 如果左边界没有，则当前key给到左边界
 				if len(tableKr.left) == 0 {
-					tableKr.left = utils.SafeCopy(tableKr.left, key)
+					tableKr.left = utils2.SafeCopy(tableKr.left, key)
 				}
 				// 更新右边界
 				tableKr.right = lastKey
@@ -379,7 +379,7 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 	}
 	for it.Valid() {
 		key := it.Item().Entry().Key
-		if len(kr.right) > 0 && utils.CompareKeys(key, kr.right) >= 0 {
+		if len(kr.right) > 0 && utils2.CompareKeys(key, kr.right) >= 0 {
 			break
 		}
 		// 拼装table创建的参数
@@ -409,7 +409,7 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 			var tbl *table
 			newFID := atomic.AddUint64(&l.maxFID, 1) // compact的时候是没有memtable的，这里自增maxFID即可。
 			// TODO 这里的sst文件需要根据level大小变化
-			sstName := utils.SSTFullFileName(l.cfg.WorkDir, newFID)
+			sstName := utils2.SSTFullFileName(l.cfg.WorkDir, newFID)
 			tbl = openTable(l, sstName, builder)
 			if tbl == nil {
 				return
@@ -419,8 +419,8 @@ func (l *LevelManager) subcompact(it utils.Iterator, kr keyRange, cd compactDef,
 	}
 }
 
-func reversedIterators(th []*table, opt *utils.Options) []utils.Iterator {
-	out := make([]utils.Iterator, 0, len(th))
+func reversedIterators(th []*table, opt *utils2.Options) []utils2.Iterator {
+	out := make([]utils2.Iterator, 0, len(th))
 	for i := len(th) - 1; i >= 0; i-- {
 		// This will increment the reference of the table handler.
 		out = append(out, th[i].NewIterator(opt))
@@ -428,7 +428,7 @@ func reversedIterators(th []*table, opt *utils.Options) []utils.Iterator {
 	return out
 }
 
-func (l *LevelManager) addManifestModifySet(cd *compactDef, newTables []*table) pb.ManifestModifies {
+func addManifestModifySet(cd *compactDef, newTables []*table) pb.ManifestModifies {
 	changes := make([]*pb.ManifestModify, 0)
 	for _, tbl := range newTables {
 		changes = append(changes, &pb.ManifestModify{
@@ -439,9 +439,8 @@ func (l *LevelManager) addManifestModifySet(cd *compactDef, newTables []*table) 
 	}
 	for _, tbl := range append(cd.top, cd.bottom...) {
 		changes = append(changes, &pb.ManifestModify{
-			Id:    tbl.fid,
-			Op:    pb.ManifestModify_DELETE,
-			Level: uint32(cd.nextLevel.levelNum),
+			Id: tbl.fid,
+			Op: pb.ManifestModify_DELETE,
 		})
 	}
 	return pb.ManifestModifies{Modifies: changes}
@@ -459,7 +458,7 @@ func (l *LevelManager) addSplits(cd *compactDef) {
 	skr.extend(cd.nextRange)
 
 	addRange := func(right []byte) {
-		skr.right = utils.Copy(right)
+		skr.right = utils2.Copy(right)
 		cd.splits = append(cd.splits, skr)
 		// left右移，将skr分片
 		skr.left = skr.right
@@ -473,7 +472,7 @@ func (l *LevelManager) addSplits(cd *compactDef) {
 		}
 		if i%group == group-1 {
 			// 设置最大值为右区间
-			right := utils.KeyWithTs(utils.ParseKey(t.sst.MaxKey()), math.MaxUint64)
+			right := utils2.KeyWithTs(utils2.ParseKey(t.sst.MaxKey()), math.MaxUint64)
 			addRange(right)
 		}
 	}
@@ -840,16 +839,16 @@ func getKeyRange(tables ...*table) keyRange {
 	min := tables[0].sst.MinKey()
 	max := tables[0].sst.MaxKey()
 	for _, t := range tables {
-		if utils.CompareKeys(t.sst.MinKey(), min) < 0 {
+		if utils2.CompareKeys(t.sst.MinKey(), min) < 0 {
 			min = t.sst.MinKey()
 		}
-		if utils.CompareKeys(t.sst.MaxKey(), max) > 0 {
+		if utils2.CompareKeys(t.sst.MaxKey(), max) > 0 {
 			max = t.sst.MaxKey()
 		}
 	}
 	return keyRange{
-		left:  utils.KeyWithTs(min, math.MaxUint64),
-		right: utils.KeyWithTs(max, 0),
+		left:  utils2.KeyWithTs(min, math.MaxUint64),
+		right: utils2.KeyWithTs(max, 0),
 	}
 }
 
@@ -868,12 +867,12 @@ func (r keyRange) overlapsWith(dst keyRange) bool {
 	}
 	//              [k-min        k-max]
 	// [d-min,d-max]
-	if utils.CompareKeys(r.left, dst.right) > 0 {
+	if utils2.CompareKeys(r.left, dst.right) > 0 {
 		return false
 	}
 	//  [k-min,k-max]
 	//              [d-min,d-max]
-	if utils.CompareKeys(dst.left, r.right) > 0 {
+	if utils2.CompareKeys(dst.left, r.right) > 0 {
 		return false
 	}
 	return true
@@ -890,10 +889,10 @@ func (r *keyRange) extend(kr keyRange) {
 	if r.isEmpty() {
 		*r = kr
 	}
-	if len(r.left) == 0 || utils.CompareKeys(kr.left, r.left) < 0 {
+	if len(r.left) == 0 || utils2.CompareKeys(kr.left, r.left) < 0 {
 		r.left = kr.left
 	}
-	if len(r.right) == 0 || utils.CompareKeys(kr.right, r.right) > 0 {
+	if len(r.right) == 0 || utils2.CompareKeys(kr.right, r.right) > 0 {
 		r.right = kr.right
 	}
 	if kr.inf {
